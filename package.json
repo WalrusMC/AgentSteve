@@ -1,0 +1,21 @@
+{
+  "name": "agent_steve",
+  "version": "1.0.0",
+  "description": "A fully autonomous AI agent named Steve!",
+  "main": "index.js",
+  "type": "module",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "author": "walrusmc.com",
+  "license": "ISC",
+  "dependencies": {
+    "discord.js": "^14.22.1",
+    "dotenv": "^17.2.3",
+    "openai": "^6.3.0"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.37.0",
+    "eslint": "^9.37.0"
+  }
+}
