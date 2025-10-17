@@ -71,6 +71,7 @@ const prompt = [
 
 export async function forwardMessage(model, message) {
   console.log(`LOG: Chose ${model} to handle this message`);
+  // Send request to OpenAI API
   const response = await client.responses.create({
     model: model,
     input: [
@@ -84,11 +85,12 @@ export async function forwardMessage(model, message) {
 
   console.log(response);
   if (response.output_text < 2001) {
-    const sentMessage = await message.channel.send(response.output_text);
-    await sentMessage.edit({
-      flags: [PermissionsBitField.Flags.SuppressEmbeds]
-    });
+    // Send the response if message is less than 2000 characters
+    return await message.channel.send(response.output_text);
+
   } else if (response.output_text) {
+    /* Split text into different sections stored in parts[]. Text is split at the nearest "\n" to 2000 characters, but 
+    not after 2000 characters. */
     const maxLength = 2000;
     const seperator = "\n";
     const fullResponse = seperator + response.output_text;
@@ -99,14 +101,12 @@ export async function forwardMessage(model, message) {
     }
 
     for (const part of parts) {
-      const sentMessage = await message.channel.send(part);
-      await sentMessage.edit({
-        flags: [PermissionsBitField.Flags.SuppressEmbeds]
-      });
+      return await message.channel.send(part);
     }
 
-    return true;
   } else {
+    // Error handling
+    return await message.channel.send("Oh no! An error has occured.");
     console.log("ERR: Something went wrong with the response.output_text");
   }
 

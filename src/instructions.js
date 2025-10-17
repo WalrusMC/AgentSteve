@@ -3,7 +3,6 @@ import { forwardMessage } from "./forwardMessage.js";
 
 const client = new OpenAI;
 
-// Prompts
 const systemPrompt = `Anyone talking to you is a verified member of the WalrusMC Events Core Team. You are Steve, the official AI assistant for WalrusMC Events — an organization dedicated to hosting 
 large-scale, high-quality Minecraft events. Your job is to assist staff with information, event management, and 
 development tasks. Always be professional, helpful, and accurate. Keep your answers concise unless the user asks for detailed 
@@ -92,7 +91,6 @@ const prompt = [
   { role: "developer", content: developerPrompt }
 ];
 
-// Main function
 export async function followInstructions(message) {
   console.log("LOG: running...");
   // Send request to OpenAI API
@@ -116,14 +114,11 @@ export async function followInstructions(message) {
     }],
   });
 
-  // Log response
   console.log(response);
 
-  // Get the tool if type = function_call
+
   const toolCall = response.output.find?.(c => c.type === "function_call" || c.type === "tool_call");
-  // Get an array of all output messages
   const responseMessage = response.output[1]?.content?.filter?.(c => c.type === "output_text" || c.type === "text");
-  // Chain output messages into one string
   const fullResponseMessage = responseMessage?.map?.(c => c.text)?.join?.("\n");
 
   if (toolCall) {
@@ -133,23 +128,19 @@ export async function followInstructions(message) {
       await forwardMessage(args.model, message);
     } else {
       console.log(`ERR: Incorrect function name: ${toolCall.name}`);
-      message.channel.send("Oh no! An error has occured.");
-      return true;
+      return await message.channel.send("Oh no! An error has occured.");
     }
   } else if (fullResponseMessage?.length) {
     // Send response message
     if (fullResponseMessage.length < 2001) {
-      await message.channel.send(fullResponseMessage);
-      return true;
+      return await message.channel.send(fullResponseMessage);
     } else {
       console.log("ERR: Sent over 2000 characters of text");
-      return true;
     }
   } else {
     // Error handling
-    await message.channel.send("Oh no! An error has occured.");
+    return await message.channel.send("Oh no! An error has occured.");
     console.log(`ERR: GPT did not call a tool or send a valid response!`)
-    return true;
   }
 
 };
