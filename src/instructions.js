@@ -76,14 +76,13 @@ Otherwise, use these guidelines to choose a model:
 
 Please perform **exactly one** of these actions:
 1. If you chose either "gpt-5-codex", "gpt-5", or "gpt-5-mini", call the \`forwardMessage\` tool with the model you have selected.
-2. Or, if you chose "gpt-5-nano", respond yourself.
+2. Or, if you chose "gpt-5-nano", respond yourself with **less than 2000 characters** of text.
 
 When responding yourself, your response will be sent on Discord, so feel free to use discord text formatting features like emojis (:emoji_name:), bold text (**text**), italics (*text*), large text(# text), and more.
 
 Do not explain your reasoning.
 Do not call more than one tool.
 Do not output anything except your chosen tool call or your final message.
-Never respond yourself with over 2000 characters.
 `
 
 
@@ -118,7 +117,7 @@ export async function followInstructions(message) {
   });
 
   // Log response
-  console.log(response.output);
+  console.log(response);
 
   // Get the tool if type = function_call
   const toolCall = response.output.find?.(c => c.type === "function_call" || c.type === "tool_call");
@@ -137,7 +136,7 @@ export async function followInstructions(message) {
       message.channel.send("Oh no! An error has occured.");
       return true;
     }
-  } else if (fullResponseMessage) {
+  } else if (fullResponseMessage?.length) {
     // Send response message
     if (fullResponseMessage.length < 2001) {
       await message.channel.send(fullResponseMessage);

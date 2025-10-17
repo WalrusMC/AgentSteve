@@ -30,11 +30,8 @@ client.on("messageCreate", async (message) => {
   if (message.author.bot) return;
   if (message.mentions.everyone) return;
   if (roleIds.some(role => message.member.roles.cache.has(role)) && message.mentions.has(client.user)) {
-    console.log("LOG: verified");
-    let done = false;
-    if(!done) message.channel.sendTyping();
-    done = await followInstructions(message);
-
+    message.channel.sendTyping();
+    await followInstructions(message);
   } else if(catIds.includes(message.channel.parentId)) {
     // Placeholder
     return;

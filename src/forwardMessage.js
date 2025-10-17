@@ -62,8 +62,7 @@ const developerPrompt = `A resoning controller for you, Steve, an AI Agent Assis
 has already chosen to send this user message to you based on user request or complexity of the message.
 Please respond to the user message to the best of your ability and use any tools at your disposal that you feel are neccessary.
 
-When sending a response, your response will be sent on Discord, so feel free to use discord text formatting features like emojis (:emoji_name:), bold text (**text**), italics (*text*), large text(# text), and more.
-Discord can only send 2000 characters at a time, so when sending a response with **over 2000 characters**, format your response into seperate sections, each less than 2000 characters long. Seperate these sections with this code: **<---93529SPLIT--->** (e.g., ...end of section<---93529SPLIT--->Beggining of next section...)`
+Your response will be sent on Discord, so feel free to use discord text formatting features like emojis (:emoji_name:), bold text (**text**), italics (*text*), large text(# text), and more in your response.`
 
 const prompt = [
   { role: "system", content: systemPrompt },
@@ -85,13 +84,27 @@ export async function forwardMessage(model, message) {
 
   console.log(response);
   if (response.output_text < 2001) {
-    await message.channel.send(response.output_text);
-    return true;
+    const sentMessage = await message.channel.send(response.output_text);
+    await sentMessage.edit({
+      flags: [PermissionsBitField.Flags.SuppressEmbeds]
+    });
   } else if (response.output_text) {
-    const parts = response.output_text.split("<---93529SPLIT--->");
-    for (const part of parts) {
-      await message.channel.send(part);
+    const maxLength = 2000;
+    const seperator = "\n";
+    const fullResponse = seperator + response.output_text;
+    const parts = [];
+
+    for (let i = 0; i < fullResponse.length/maxLength; i++) {
+      parts.push(fullResponse.substring(fullResponse.lastIndexOf(seperator, maxLength*i) + 1, fullResponse.lastIndexOf(seperator, maxLength*(i+1))));
     }
+
+    for (const part of parts) {
+      const sentMessage = await message.channel.send(part);
+      await sentMessage.edit({
+        flags: [PermissionsBitField.Flags.SuppressEmbeds]
+      });
+    }
+
     return true;
   } else {
     console.log("ERR: Something went wrong with the response.output_text");
