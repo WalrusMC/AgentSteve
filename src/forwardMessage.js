@@ -1,3 +1,4 @@
+import { logAmount, logResponse } from "../devVariables.js";
 import OpenAI from "openai";
 
 const client = new OpenAI;
@@ -70,7 +71,8 @@ const prompt = [
 ]
 
 export async function forwardMessage(model, message) {
-  console.log(`LOG: Chose ${model} to handle this message`);
+  if (logAmount) console.log(`LOG: gpt-5-nano chose ${model} to handle this message`);
+
   // Send request to OpenAI API
   const response = await client.responses.create({
     model: model,
@@ -83,31 +85,51 @@ export async function forwardMessage(model, message) {
     ],
   });
 
-  console.log(response);
-  if (response.output_text < 2001) {
-    // Send the response if message is less than 2000 characters
-    return await message.channel.send(response.output_text);
+  if (logResponse && logAmount) console.log(`LOG: ${response}`);
 
-  } else if (response.output_text) {
-    /* Split text into different sections stored in parts[]. Text is split at the nearest "\n" to 2000 characters, but 
-    not after 2000 characters. */
+  const sentMessages = [];
+
+  if (response.output_text) {
+    if (logAmount >= 2) console.log(`LOG: Recieved response.output_text with a length of ${response.output_text.length} characters`);
+
     const maxLength = 2000;
-    const seperator = "\n";
-    const fullResponse = seperator + response.output_text;
-    const parts = [];
+    const separator = "\n"
+    let responsePiece = response.output_text; // Response to be broken down into messageSections[]
+    const messageSections = []; // Array to store all message sections
 
-    for (let i = 0; i < fullResponse.length/maxLength; i++) {
-      parts.push(fullResponse.substring(fullResponse.lastIndexOf(seperator, maxLength*i) + 1, fullResponse.lastIndexOf(seperator, maxLength*(i+1))));
+    // While responsePiece is still a non-empty string
+    while(responsePiece) {
+      // If responsePiece.length > maxLength
+      // Take responsePiece[0] through responsePiece[index of the nearest character to the maxLength right before the separator]
+      if (responsePiece?.length > maxLength) {
+        if (logAmount === 2) console.log("LOG: Splitting response.output_text");
+
+        messageSections.push(
+          responsePiece.substring(
+            0,
+            responsePiece.lastIndexOf(separator, maxLength)
+          )
+        )
+      } else {
+        // Add the remaining characters in responsePiece to messageSections[]
+        messageSections.push(responsePiece);
+        responsePiece = false;
+        break;
+      }
+
+      // Remove responsePiece[0] through responsePiece[index of last character of the separator]
+      responsePiece = responsePiece?.slice(responsePiece?.lastIndexOf(separator, maxLength) + 1);
     }
 
-    for (const part of parts) {
-      return await message.channel.send(part);
+    for (const messageSection of messageSections) {
+      if (logAmount === 2) console.log(`LOG: Sending a message with a length of ${messageSection.length} characters`);
+      sentMessages.push(await message.channel.send(messageSection));
     }
-
+    return sentMessages;
+    
   } else {
-    // Error handling
-    return await message.channel.send("Oh no! An error has occured.");
-    console.log("ERR: Something went wrong with the response.output_text");
+    console.log("ERR: GPT did not send a valid response or call a tool!");
+    sentMessages.push(await message.channel.send("Oh no! An error has occurred."));
+    return sentMessages;
   }
-
 };

@@ -1,3 +1,4 @@
+import { logAmount, logResponse } from "../devVariables.js";
 import OpenAI from "openai";
 import { forwardMessage } from "./forwardMessage.js";
 
@@ -68,7 +69,7 @@ If the user explicitly specifies a valid GPT model to use ("gpt-5-codex", "gpt-5
 Otherwise, use these guidelines to choose a model:
 
 - **gpt-5-codex** → Use for advanced, multi-step coding or plugin development tasks that require reasoning, planning, or multiple code files.
-- **gpt-5** → Use for highly technical, analytical, or multi-step reasoning tasks (e.g., automations, system design, complex logic, or deep technical help).
+- **gpt-5** → Use for highly technical, highly analytical, or large multi-step reasoning tasks (e.g., automations, system design, complex logic, or deep technical help).
 - **gpt-5-mini** → Use for general or moderately complex tasks, code snippets, or informational queries.
 - **gpt-5-nano** → Use for short, direct, and simple questions that can be answered conversationally. If the user asks you to do something that you don't have the ability to do, **NEVER** choose "gpt-5-nano" to respond. Instead, choose a different model, as they have access to a broader variety of tools.
 
@@ -92,7 +93,8 @@ const prompt = [
 ];
 
 export async function followInstructions(message) {
-  console.log("LOG: running...");
+  if (logAmount === 2) console.log("LOG: Sent initial request to gpt-5-nano");
+
   // Send request to OpenAI API
   const response = await client.responses.create({
     model: "gpt-5-nano",
@@ -114,33 +116,40 @@ export async function followInstructions(message) {
     }],
   });
 
-  console.log(response);
-
+  if (logResponse && logAmount) console.log(response);
 
   const toolCall = response.output.find?.(c => c.type === "function_call" || c.type === "tool_call");
   const responseMessage = response.output[1]?.content?.filter?.(c => c.type === "output_text" || c.type === "text");
   const fullResponseMessage = responseMessage?.map?.(c => c.text)?.join?.("\n");
 
+  const sentMessages = [];
   if (toolCall) {
+    if (logAmount === 2) console.log("LOG: gpt-5-nano chose to call a different model");
+
     // Call a different model
     const args = JSON.parse(toolCall.arguments);
     if (toolCall.name === "forwardMessage") {
-      await forwardMessage(args.model, message);
+      return await forwardMessage(args.model, message);
     } else {
       console.log(`ERR: Incorrect function name: ${toolCall.name}`);
-      return await message.channel.send("Oh no! An error has occured.");
+      sentMessages.push(await message.channel.send("Oh no! An error has occured."));
+      return sentMessages;
     }
   } else if (fullResponseMessage?.length) {
+    if (logAmount === 2) console.log(`LOG: gpt-5-nano chose to send a response of ${response.output_text.length} characters`);
+
     // Send response message
     if (fullResponseMessage.length < 2001) {
-      return await message.channel.send(fullResponseMessage);
+      sentMessages.push(await message.channel.send(fullResponseMessage));
+      return sentMessages;
     } else {
       console.log("ERR: Sent over 2000 characters of text");
     }
   } else {
     // Error handling
-    return await message.channel.send("Oh no! An error has occured.");
+    sentMessages.push(await message.channel.send("Oh no! An error has occured."));
     console.log(`ERR: GPT did not call a tool or send a valid response!`)
+    return sentMessages;
   }
 
 };
