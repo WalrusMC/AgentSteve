@@ -1,6 +1,6 @@
 import { logAmount, logResponse } from "../devVariables.js";
 import OpenAI from "openai";
-import { forwardMessage } from "./forwardMessage.js";
+import { respond } from "./responder.js";
 
 const client = new OpenAI;
 
@@ -75,7 +75,7 @@ Otherwise, use these guidelines to choose a model:
 
 
 Please perform **exactly one** of these actions:
-1. If you chose either "gpt-5-codex", "gpt-5", or "gpt-5-mini", call the \`forwardMessage\` tool with the model you have selected.
+1. If you chose either "gpt-5-codex", "gpt-5", or "gpt-5-mini", call the \`respond\` tool with the model you have selected.
 2. Or, if you chose "gpt-5-nano", respond yourself with **less than 2000 characters** of text.
 
 When responding yourself, your response will be sent on Discord, so feel free to use discord text formatting features like emojis (:emoji_name:), bold text (**text**), italics (*text*), large text(# text), and more.
@@ -92,7 +92,7 @@ const prompt = [
   { role: "developer", content: developerPrompt }
 ];
 
-export async function followInstructions(message) {
+export async function router(message) {
   if (logAmount === 2) console.log("LOG: Sent initial request to gpt-5-nano");
 
   // Send request to OpenAI API
@@ -104,7 +104,7 @@ export async function followInstructions(message) {
     ],
     tools: [{
       type: "function",
-      name: "forwardMessage",
+      name: "respond",
       description: "Forward the message to a specified GPT model",
       parameters: {
         type: "object",
@@ -128,8 +128,8 @@ export async function followInstructions(message) {
 
     // Call a different model
     const args = JSON.parse(toolCall.arguments);
-    if (toolCall.name === "forwardMessage") {
-      return await forwardMessage(args.model, message);
+    if (toolCall.name === "respond") {
+      return await respond(args.model, message);
     } else {
       console.log(`ERR: Incorrect function name: ${toolCall.name}`);
       sentMessages.push(await message.channel.send("Oh no! An error has occured."));

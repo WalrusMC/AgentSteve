@@ -70,7 +70,7 @@ const prompt = [
   { role: "developer", content: developerPrompt },
 ]
 
-export async function forwardMessage(model, message) {
+export async function respond(model, message) {
   if (logAmount) console.log(`LOG: gpt-5-nano chose ${model} to handle this message`);
 
   // Send request to OpenAI API

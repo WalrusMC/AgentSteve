@@ -1,7 +1,7 @@
-import { logAmount, logResponse } from "../devVariables.js";
+import { logAmount } from "../devVariables.js";
 import "dotenv/config";
 import { Client, GatewayIntentBits } from "discord.js";
-import { followInstructions } from "./instructions.js";
+import { router } from "./router.js";
 
 const roleIds = process.env.EVERY_ROLE_ID.split(",");
 const catIds = process.env.EVERY_CAT_ID.split(",");
@@ -42,7 +42,7 @@ client.on("messageCreate", async (message) => {
     }, 9000);
 
     // Generate response
-    const sentMessages = await followInstructions(message);
+    const sentMessages = await router(message);
 
     // Remove embeds
     for (const sentMessage of sentMessages ) {
