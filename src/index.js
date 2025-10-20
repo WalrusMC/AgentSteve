@@ -55,8 +55,11 @@ client.on("messageCreate", async (message) => {
     clearInterval(typingInterval);
 
   } else if(catIds.includes(message.channel.parentId)) {
-    if (logAmount === 2) console.log("LOG: User did not ping Steve or does not have permission to ping Steve and is typing in a support ticket");
+    //if (logAmount === 2) console.log("LOG: User did not ping Steve or does not have permission to ping Steve and is typing in a support ticket");
     // Placeholder
-    return;
+    const chats = await message.channel.messages.fetch({ limit: 20 });
+    for (const chat of chats.values()) {
+      console.log(`AUTHOR: ${chat?.author?.username}\nMESSAGE: ${chat?.content}\n`);
+    }
   }
 })
