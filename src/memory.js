@@ -2,9 +2,11 @@ import { logAmount, logResponse } from "../devVariables.js";
 import OpenAI from "openai";
 
 const client = new OpenAI;
+const roleIds = process.env.EVERY_ROLE_ID.split(",");
 
 const systemPrompt = `You are Steve, the official AI assistant for WalrusMC Events — an organization dedicated to hosting 
-large-scale, high-quality Minecraft events. Your job is to respond with a summarization of the past chats of a Discord chat channel.
+large-scale, high-quality Minecraft events. Your username is Agent Steve#0091 and your user id is 1424553419909107833. Your job is to respond 
+with a summarization of the past chats of a Discord chat channel.
 
 ---
 WalrusMC Events Acronyms and Synonyms:
@@ -53,11 +55,16 @@ For WalrusMC staff to gain access to a specific asset, they must contact a membe
 You may rely on this background information for information about WalrusMC Events.
 
 `
-const developerPrompt = `You are a memory summarizer for Steve, the offical WalrusMC Events AI assistant. You will be given past Discord chats, 
+const developerPrompt = `You are a memory summarizer for Steve, the offical WalrusMC Events AI assistant. You will be given some past Discord chats, 
 the senders of these chats, and the roles of the senders of these chats. Your job is to respond with a short summarization of these past chats.
 
-Every chat message you receive will be formatted as such:
-(ROLE)(USER)MESSAGE
+Keep In Mind:
+- Chats are on a Discord server and are formatted as such. (E.g., <@userid> (ping), :emoji_name: (emoji), # (larg text), ** (bold) * (italics), etc)
+- User IDs correspond with user names.
+- Your user ID is 1424553419909107833 and your username is Agent Steve#0091
+
+Every chat message you receive will be formatted as such, in order from oldest to newest message:
+(ROLE)(USERNAME)(USERID)MESSAGE
 
 Possible User Roles:
 - CORE TEAM
@@ -69,20 +76,59 @@ Two users, heliumdotxd (CORE TEAM) and .alphapancake (NOT CORE TEAM) are hosting
 - The event starts Friday at 6 PM EST.
 
 Behavior:
-- Keep summarizations between 100-300 characters.
+- When talking about users, use their usernames when possible, not their user ids.
+- When talking about yourself (Agent Steve) please refer to yourself in the first person.
+- Do NOT answer user requests- ONLY summarize the chat history.
+- Keep summarizations anywhere between 200-1000 characters.
 - Include key details such as user names, times, and user roles among others.
-- `
+`
 
 const prompts = [
   { role: "system", content: systemPrompt },
   { role: "developer", content: developerPrompt },
 ]
 
-export function summarize(message) {
+export async function summarize(message) {
 
-  client.responses.create({
+  const senderRole = roleIds.some(role => message.member.roles.cache.has(role)) ? "CORE TEAM" : "NOT CORE TEAM";
+
+  if (logAmount === 2) console.log("LOG: Summarizing chat history");
+
+  const getChats = await message.channel.messages.fetch({ limit: 25 });
+  const chats = Array.from(getChats.values());
+  chats.shift();
+  chats.reverse();
+  let chatString = "";
+  let lengthCounter = 0; // Stores total chat character count
+
+  // Add all messages to chatString in this format: (ROLE)(USERNAME)(USERID)MESSAGE\n
+  for (const chat of chats) {
+    lengthCounter += chat.content.length;
+    if (lengthCounter < 20000) {
+      let role;
+
+      await message.guild.members.fetch(chat.author.id);
+
+      if (chat.member && roleIds.some(role => chat.member.roles.cache.has(role))) {
+        role = "CORE TEAM";
+      } else {
+        role = "NOT CORE TEAM";
+      }
+
+      chatString += `(${role})(${chat.author.username})(${chat.author.id})${chat.content}\n`;
+    }
+  }
+
+  if (logAmount === 2) console.log(`--- LOG ---\n(MEMORY)\n${chatString}\n(Current User Message)\n(${senderRole})(${message.author.username})(${message.author.id})${message.content}\n--- LOG ---`);
+
+  const response = await client.responses.create({
+    model: "gpt-5-nano",
     input: [
       ...prompts,
-    ]
+      { role: "user", content: `(Current User Message)${message.content}\n\n(MEMORY)\n${chatString}`},
+    ],
   });
+
+  if (logResponse && logAmount) console.log(response);
+
 }

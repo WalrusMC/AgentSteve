@@ -2,6 +2,7 @@ import { logAmount } from "../devVariables.js";
 import "dotenv/config";
 import { Client, GatewayIntentBits } from "discord.js";
 import { router } from "./router.js";
+import { summarize } from "./memory.js";
 
 const roleIds = process.env.EVERY_ROLE_ID.split(",");
 const catIds = process.env.EVERY_CAT_ID.split(",");
@@ -28,6 +29,7 @@ client.once("clientReady", (readyClient) => {
 client.login(process.env.TOKEN);
 
 client.on("messageCreate", async (message) => {
+  summarize(message);
   if (message.author.bot) return;
   if (message.mentions.everyone) return;
   if (roleIds.some(role => message.member.roles.cache.has(role)) && message.mentions.has(client.user)) {
@@ -57,9 +59,6 @@ client.on("messageCreate", async (message) => {
   } else if(catIds.includes(message.channel.parentId)) {
     //if (logAmount === 2) console.log("LOG: User did not ping Steve or does not have permission to ping Steve and is typing in a support ticket");
     // Placeholder
-    const chats = await message.channel.messages.fetch({ limit: 20 });
-    for (const chat of chats.values()) {
-      console.log(`AUTHOR: ${chat?.author?.username}\nMESSAGE: ${chat?.content}\n`);
-    }
+    return;
   }
 })

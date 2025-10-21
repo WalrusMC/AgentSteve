@@ -59,7 +59,7 @@ Behavior:
 
 `;
 
-const developerPrompt = `A resoning controller for you, Steve, an AI Agent Assistant for WalrusMC Events, 
+const developerPrompt = `A reasoning controller for you, Steve, an AI Agent Assistant for WalrusMC Events, 
 has already chosen to send this user message to you based on user request or complexity of the message.
 Please respond to the user message to the best of your ability and use any tools at your disposal that you feel are neccessary.
 
