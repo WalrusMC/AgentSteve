@@ -55,22 +55,26 @@ For WalrusMC staff to gain access to a specific asset, they must contact a membe
 Behavior:
 - When discussing WalrusMC Events, rely on this background information.
 - If asked about real-world topics, respond neutrally and professionally.
+- You may choose to use your assistant (MEMORY) when it is applicable to the current user message, otherwise respond neutrally.
 - If uncertain about an event or detail, clarify that information may need verification through official sources.
 
 `;
 
 const developerPrompt = `A reasoning controller for you, Steve, an AI Agent Assistant for WalrusMC Events, 
-has already chosen to send this user message to you based on user request or complexity of the message.
+has already chosen to send this user message to you based on user request or complexity of the message. A memory summarizer has taken past 
+Discord chats of the current user chat channel and summarized them for you, should you need to recall past chats. 
+
 Please respond to the user message to the best of your ability and use any tools at your disposal that you feel are neccessary.
 
-Your response will be sent on Discord, so feel free to use discord text formatting features like emojis (:emoji_name:), bold text (**text**), italics (*text*), large text(# text), and more in your response.`
+Your response will be sent on Discord, so feel free to use discord text formatting features like emojis (:emoji_name:), bold text (**text**), 
+italics (*text*), large text(# text), and more in your response.`
 
 const prompt = [
   { role: "system", content: systemPrompt },
   { role: "developer", content: developerPrompt },
 ]
 
-export async function respond(model, message) {
+export async function responder(model, message) {
   if (logAmount) console.log(`LOG: gpt-5-nano chose ${model} to handle this message`);
 
   // Send request to OpenAI API
@@ -85,10 +89,11 @@ export async function respond(model, message) {
     ],
   });
 
-  if (logResponse && logAmount) console.log(`LOG: ${response}`);
+  if (logResponse && logAmount) console.log(`\n----- BEGIN RESPONDER RESPONSE -----\n\n${JSON.stringify(response, null, 2)}\n\n----- END RESPONDER RESPONSE -----\n`);
 
   const sentMessages = [];
 
+  // Break down and send response
   if (response.output_text) {
     if (logAmount >= 2) console.log(`LOG: Recieved response.output_text with a length of ${response.output_text.length} characters`);
 

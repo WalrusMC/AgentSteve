@@ -1,5 +1,6 @@
 import { logAmount, logResponse } from "../devVariables.js";
 import OpenAI from "openai";
+import fs from "fs";
 
 const client = new OpenAI;
 const roleIds = process.env.EVERY_ROLE_ID.split(",");
@@ -9,6 +10,7 @@ large-scale, high-quality Minecraft events. Your username is Agent Steve#0091 an
 with a summarization of the past chats of a Discord chat channel.
 
 ---
+
 WalrusMC Events Acronyms and Synonyms:
 - WalrusMC Events
 - WMC Events
@@ -43,7 +45,7 @@ Developer and Technical Information:
 ---
 
 Official Assets:
-For WalrusMC staff to gain access to a specific asset, they must contact a member of the WalrusMC Core Team via email or Discord.
+For WalrusMC staff to gain access to a specific asset, they must contact a member of the WalrusMC Core Team via email (support@walrusmc.com) or Discord.
 - Discord: https://discord.gg/Cg7BFxFjrc (invite link)
 - Website: https://walrusmc.com  
 - GitHub: https://github.com/WalrusMCEvents  
@@ -55,8 +57,9 @@ For WalrusMC staff to gain access to a specific asset, they must contact a membe
 You may rely on this background information for information about WalrusMC Events.
 
 `
-const developerPrompt = `You are a memory summarizer for Steve, the offical WalrusMC Events AI assistant. You will be given some past Discord chats, 
-the senders of these chats, and the roles of the senders of these chats. Your job is to respond with a short summarization of these past chats.
+const developerPrompt = `You are a memory summarizer for Steve, the offical WalrusMC Events AI assistant. You will be given some past Discord 
+chats of the current user chat channel, the senders of these chats, and the roles of the senders of these chats. Your job is to respond with a 
+short summarization of these past chats.
 
 Keep In Mind:
 - Chats are on a Discord server and are formatted as such. (E.g., <@userid> (ping), :emoji_name: (emoji), # (larg text), ** (bold) * (italics), etc)
@@ -78,7 +81,7 @@ Two users, heliumdotxd (CORE TEAM) and .alphapancake (NOT CORE TEAM) are hosting
 Behavior:
 - When talking about users, use their usernames when possible, not their user ids.
 - When talking about yourself (Agent Steve) please refer to yourself in the first person.
-- Do NOT answer user requests- ONLY summarize the chat history.
+- Do NOT answer user requests or explain what you're summarizing- ONLY summarize the chat history.
 - Keep summarizations anywhere between 200-1000 characters.
 - Include key details such as user names, times, and user roles among others.
 `
@@ -88,13 +91,13 @@ const prompts = [
   { role: "developer", content: developerPrompt },
 ]
 
-export async function summarize(message) {
+export async function summarizer(message) {
 
   const senderRole = roleIds.some(role => message.member.roles.cache.has(role)) ? "CORE TEAM" : "NOT CORE TEAM";
 
   if (logAmount === 2) console.log("LOG: Summarizing chat history");
 
-  const getChats = await message.channel.messages.fetch({ limit: 25 });
+  const getChats = await message.channel.messages.fetch({ limit: 30 });
   const chats = Array.from(getChats.values());
   chats.shift();
   chats.reverse();
@@ -104,7 +107,7 @@ export async function summarize(message) {
   // Add all messages to chatString in this format: (ROLE)(USERNAME)(USERID)MESSAGE\n
   for (const chat of chats) {
     lengthCounter += chat.content.length;
-    if (lengthCounter < 20000) {
+    if (lengthCounter < 30000) {
       let role;
 
       await message.guild.members.fetch(chat.author.id);
@@ -119,8 +122,6 @@ export async function summarize(message) {
     }
   }
 
-  if (logAmount === 2) console.log(`--- LOG ---\n(MEMORY)\n${chatString}\n(Current User Message)\n(${senderRole})(${message.author.username})(${message.author.id})${message.content}\n--- LOG ---`);
-
   const response = await client.responses.create({
     model: "gpt-5-nano",
     input: [
@@ -129,6 +130,10 @@ export async function summarize(message) {
     ],
   });
 
-  if (logResponse && logAmount) console.log(response);
+  if (logResponse && logAmount) console.log(`\n----- BEGIN SUMMARIZER RESPONSE -----\n\n${JSON.stringify(response, null, 2)}\n\n----- END SUMMARIZER RESPONSE -----\n`);
+
+  const summary = { summary: response.output_text };
+
+  fs.writeFileSync("./db/summaries.json", JSON.stringify(summary, null, 2));
 
 }

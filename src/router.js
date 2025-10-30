@@ -1,6 +1,6 @@
 import { logAmount, logResponse } from "../devVariables.js";
 import OpenAI from "openai";
-import { respond } from "./responder.js";
+import { responder } from "./responder.js";
 
 const client = new OpenAI;
 
@@ -56,12 +56,14 @@ For WalrusMC staff to gain access to a specific asset, they must contact another
 Behavior:
 - When discussing WalrusMC Events, rely on this background information.
 - If asked about real-world topics, respond neutrally and professionally.
+- You may choose to use your assistant (MEMORY SUMMARY) when it is applicable to the current user message, otherwise respond neutrally.
 - If uncertain about an event or detail, clarify that information may need verification through official sources.
 
 `;
 
 const developerPrompt = `
-You are the **Reasoning Controller** for Steve, an AI assistant for WalrusMC Events.
+You are the **Reasoning Controller** for Steve, an AI assistant for WalrusMC Events. A memory summarizer has taken past Discord chats of
+the current user chat channel and summarized them for you so that you know the context of the user input.
 
 Your job is to analyze the user's latest message and take **exactly one** of the following actions, based on the message's complexity and topic.
 
@@ -75,10 +77,11 @@ Otherwise, use these guidelines to choose a model:
 
 
 Please perform **exactly one** of these actions:
-1. If you chose either "gpt-5-codex", "gpt-5", or "gpt-5-mini", call the \`respond\` tool with the model you have selected.
+1. If you chose either "gpt-5-codex", "gpt-5", or "gpt-5-mini", call the \`responder\` tool with the model you have selected.
 2. Or, if you chose "gpt-5-nano", respond yourself with **less than 2000 characters** of text.
 
-When responding yourself, your response will be sent on Discord, so feel free to use discord text formatting features like emojis (:emoji_name:), bold text (**text**), italics (*text*), large text(# text), and more.
+When responding yourself, your response will be sent on Discord, so feel free to use discord text formatting features like emojis (:emoji_name:), 
+bold text (**text**), italics (*text*), large text(# text), and more. 
 
 Do not explain your reasoning.
 Do not call more than one tool.
@@ -92,7 +95,7 @@ const prompt = [
   { role: "developer", content: developerPrompt }
 ];
 
-export async function router(message) {
+export async function router(message, summary) {
   if (logAmount === 2) console.log("LOG: Sent initial request to gpt-5-nano");
 
   // Send request to OpenAI API
@@ -101,10 +104,11 @@ export async function router(message) {
     input: [
       ...prompt,
       { role: "user", content: message.content },
+      { role: "assistant", content: `(MEMORY SUMMARY)\n${summary}` },
     ],
     tools: [{
       type: "function",
-      name: "respond",
+      name: "responder",
       description: "Forward the message to a specified GPT model",
       parameters: {
         type: "object",
@@ -116,7 +120,7 @@ export async function router(message) {
     }],
   });
 
-  if (logResponse && logAmount) console.log(response);
+  if (logResponse && logAmount) console.log(`\n----- BEGIN ROUTER RESPONSE -----\n\n${JSON.stringify(response, null, 2)}\n\n----- END ROUTER RESPONSE -----\n`);
 
   const toolCall = response.output.find?.(c => c.type === "function_call" || c.type === "tool_call");
   const responseMessage = response.output[1]?.content?.filter?.(c => c.type === "output_text" || c.type === "text");
@@ -128,8 +132,8 @@ export async function router(message) {
 
     // Call a different model
     const args = JSON.parse(toolCall.arguments);
-    if (toolCall.name === "respond") {
-      return await respond(args.model, message);
+    if (toolCall.name === "responder") {
+      return await responder(args.model, message);
     } else {
       console.log(`ERR: Incorrect function name: ${toolCall.name}`);
       sentMessages.push(await message.channel.send("Oh no! An error has occured."));

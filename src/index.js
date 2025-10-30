@@ -2,7 +2,8 @@ import { logAmount } from "../devVariables.js";
 import "dotenv/config";
 import { Client, GatewayIntentBits } from "discord.js";
 import { router } from "./router.js";
-import { summarize } from "./memory.js";
+import { summarizer } from "./summarizer.js";
+import fs from "fs";
 
 const roleIds = process.env.EVERY_ROLE_ID.split(",");
 const catIds = process.env.EVERY_CAT_ID.split(",");
@@ -29,7 +30,6 @@ client.once("clientReady", (readyClient) => {
 client.login(process.env.TOKEN);
 
 client.on("messageCreate", async (message) => {
-  summarize(message);
   if (message.author.bot) return;
   if (message.mentions.everyone) return;
   if (roleIds.some(role => message.member.roles.cache.has(role)) && message.mentions.has(client.user)) {
@@ -43,8 +43,12 @@ client.on("messageCreate", async (message) => {
       message.channel.sendTyping();
     }, 9000);
 
-    // Generate response
-    const sentMessages = await router(message);
+    // Summarize
+    summarizer(message);
+
+    // Respond to user request
+    const summaries = JSON.parse(fs.readFileSync("./db/summaries.json", "utf8"));
+    const sentMessages = await router(message, summaries.summary);
 
     // Remove embeds
     for (const sentMessage of sentMessages ) {
