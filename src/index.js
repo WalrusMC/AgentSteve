@@ -48,7 +48,7 @@ client.on("messageCreate", async (message) => {
 
     // Respond to user request
     const summaries = JSON.parse(fs.readFileSync("./db/summaries.json", "utf8"));
-    const sentMessages = await router(message, summaries.summary);
+    const sentMessages = await router(message, summaries[message.channel.id] ? summaries[message.channel.id] : "NO PAST SUMMARIZATION FOUND!");
 
     // Remove embeds
     for (const sentMessage of sentMessages ) {
