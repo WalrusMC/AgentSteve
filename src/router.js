@@ -2,6 +2,7 @@ import { logAmount, logResponse } from "../devVariables.js";
 import OpenAI from "openai";
 import { responder } from "./responder.js";
 
+const roleIds = process.env.EVERY_ROLE_ID.split(",");
 const client = new OpenAI;
 
 const systemPrompt = `Any user messaging you is a verified member of the WalrusMC Events Core Team. You are Steve, the official AI assistant for WalrusMC Events — an organization dedicated to hosting 
@@ -53,17 +54,23 @@ For WalrusMC staff to gain access to a specific asset, they must contact another
 
 ---
 
+Extra Information:
+- Most staff use EST/EDT timezone, so when staff use a time and don't list the timezone, assume they are talking about EST/EDT.
+
+---
+
 Behavior:
 - When discussing WalrusMC Events, rely on this background information.
 - If asked about real-world topics, respond neutrally and professionally.
-- You may choose to use your assistant (MEMORY SUMMARY) when it is applicable to the current user message, otherwise respond neutrally.
+- You may choose to use your assistant (MEMORY SUMMARY) and your user (PAST CHATS) when it is applicable to the current user message, otherwise respond neutrally.
 - If uncertain about an event or detail, clarify that information may need verification through official sources.
 
 `;
 
 const developerPrompt = `
 You are the **Reasoning Controller** for Steve, an AI assistant for WalrusMC Events. A memory summarizer has taken past Discord chats of
-the current user chat channel and summarized them for you so that you know the context of the user input.
+the current user chat channel and summarized them for you so that you know the context of the user input. Should you need to recall exact
+past chats, you have been sent a few of the latest past chats exactly as they are.
 
 Your job is to analyze the user's latest message and take **exactly one** of the following actions, based on the message's complexity and topic.
 
@@ -96,14 +103,45 @@ const prompt = [
 ];
 
 export async function router(message, summary) {
-  if (logAmount === 2) console.log("LOG: Sent initial request to gpt-5-nano");
+
+  // Get past chats
+  const getChats = await message.channel.messages.fetch({ limit: 6 });
+  const chats = Array.from(getChats.values());
+  chats.shift();
+  chats.reverse();
+  let chatString = "";
+  let lengthCounter = 0; // Stores total chat character count
+
+  // Add all messages to chatString in this format: (ROLE)(USERNAME)(USERID)MESSAGE\n
+  for (const chat of chats) {
+    lengthCounter += chat.content.length;
+    if (lengthCounter < 2002) {
+      let role;
+
+      await message.guild.members.fetch(chat.author.id);
+
+      if (chat.member && roleIds.some(role => chat.member.roles.cache.has(role))) {
+        role = "CORE TEAM";
+      } else {
+        role = "NOT CORE TEAM";
+      }
+
+      chatString += `UTC_TIME:${chat.createdAt.toISOString()}|ROLE:${role}|USERNMAME:${chat.author.username}|USER_ID:${chat.author.id}|CHAT:${chat.content}\n`;
+    }
+  }
+
+  // Put together the user input
+  const userMessages = `(PAST CHATS)\n${chatString}\n(CURRENT USER MESSAGE)UTC_TIME:${message.createdAt.toISOString()}|ROLE:CORE TEAM|USERNMAME:${message.author.username}|USER_ID:${message.author.id}|CHAT:${message.content}\n`;
+
+  if (logAmount === 2) console.log(`----- BEGIN PAST CHATS -----\n\n${userMessages}\n\n----- END PAST CHATS -----`);
 
   // Send request to OpenAI API
+  if (logAmount === 2) console.log("LOG: Sent initial request to gpt-5-nano");
   const response = await client.responses.create({
     model: "gpt-5-nano",
     input: [
       ...prompt,
-      { role: "user", content: message.content },
+      { role: "user", content: userMessages },
       { role: "assistant", content: `(MEMORY SUMMARY)\n${summary}` },
     ],
     tools: [{

@@ -54,6 +54,11 @@ For WalrusMC staff to gain access to a specific asset, they must contact a membe
 
 ---
 
+Extra Information:
+- Most staff use EST/EDT timezone, so when staff use a time and don't list the timezone, assume they are talking about EST/EDT.
+
+---
+
 You may rely on this background information for information about WalrusMC Events.
 
 `
