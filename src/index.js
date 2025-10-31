@@ -29,10 +29,13 @@ client.once("clientReady", (readyClient) => {
 // Login
 client.login(process.env.TOKEN);
 
+let currentlyRunning = false;
+
 client.on("messageCreate", async (message) => {
   if (message.author.bot) return;
   if (message.mentions.everyone) return;
-  if (roleIds.some(role => message.member.roles.cache.has(role)) && message.mentions.has(client.user)) {
+  if (roleIds.some(role => message.member.roles.cache.has(role)) && message.mentions.has(client.user) && !currentlyRunning) {
+    currentlyRunning = true;
     if (logAmount === 2) console.log("LOG: A user pinged Steve and has correct permissions");
   
     // Make bot say typing while it generates a response
@@ -59,6 +62,8 @@ client.on("messageCreate", async (message) => {
     // Stop typing
     if (logAmount === 2) console.log("LOG: Cleared typing interval");
     clearInterval(typingInterval);
+
+    currentlyRunning = false;
 
   } else if(catIds.includes(message.channel.parentId)) {
     //if (logAmount === 2) console.log("LOG: User did not ping Steve or does not have permission to ping Steve and is typing in a support ticket");
