@@ -72,7 +72,7 @@ chats of the current user chat channel and summarized them for you so that you k
 past chats, you have been sent a few of the latest past chats exactly as they are.
 
 
-Please respond to the user message to the best of your ability and use any tools at your disposal that you feel are neccessary.
+Please respond to the **CURRENT USER MESSAGE** to the best of your ability and use any tools at your disposal that you feel are neccessary.
 
 Your response will be sent on Discord, so feel free to use discord text formatting features like emojis (:emoji_name:), bold text (**text**), 
 italics (*text*), large text(# text), and more in your response.`
@@ -86,7 +86,7 @@ export async function responder(model, message) {
   if (logAmount) console.log(`LOG: gpt-5-nano chose ${model} to handle this message`);
 
   // Get past chats
-  const getChats = await message.channel.messages.fetch({ limit: 6 });
+  const getChats = await message.channel.messages.fetch({ limit: 10 });
   const chats = Array.from(getChats.values());
   chats.shift();
   chats.reverse();

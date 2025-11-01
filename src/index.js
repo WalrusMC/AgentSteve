@@ -3,7 +3,7 @@ import "dotenv/config";
 import { Client, GatewayIntentBits } from "discord.js";
 import { router } from "./router.js";
 import { summarizer } from "./summarizer.js";
-import fs from "fs";
+import fs from "fs/promises";
 
 const roleIds = process.env.EVERY_ROLE_ID.split(",");
 const catIds = process.env.EVERY_CAT_ID.split(",");
@@ -43,14 +43,14 @@ client.on("messageCreate", async (message) => {
     message.channel.sendTyping();
     const typingInterval = setInterval(() => {
       if (logAmount === 2) console.log("LOG: Steve started typing again");
-      message.channel.sendTyping();
+      if(currentlyRunning) message.channel.sendTyping();
     }, 9000);
 
     // Summarize
     summarizer(message);
 
     // Respond to user request
-    const summaries = JSON.parse(fs.readFileSync("./db/summaries.json", "utf8"));
+    const summaries = JSON.parse(await fs.readFile("./db/summaries.json", "utf8"));
     const sentMessages = await router(message, summaries[message.channel.id] ? summaries[message.channel.id] : "NO PAST SUMMARIZATION FOUND!");
 
     // Remove embeds

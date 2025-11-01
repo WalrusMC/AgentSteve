@@ -1,6 +1,6 @@
 import { logAmount, logResponse } from "../devVariables.js";
 import OpenAI from "openai";
-import fs from "fs";
+import fs from "fs/promises";
 
 const client = new OpenAI;
 const roleIds = process.env.EVERY_ROLE_ID.split(",");
@@ -137,10 +137,10 @@ export async function summarizer(message) {
 
   if (logResponse && logAmount) console.log(`\n----- BEGIN SUMMARIZER RESPONSE -----\n\n${JSON.stringify(response, null, 2)}\n\n----- END SUMMARIZER RESPONSE -----\n`);
 
-  const summaries = JSON.parse(fs.readFileSync("./db/summaries.json", "utf-8"));
+  const summaries = JSON.parse(await fs.readFile("./db/summaries.json", "utf-8"));
 
   summaries[message.channel.id] = response.output_text;
 
-  fs.writeFileSync("./db/summaries.json", JSON.stringify(summaries, null, 2));
+  await fs.writeFile("./db/summaries.json", JSON.stringify(summaries, null, 2));
 
 }

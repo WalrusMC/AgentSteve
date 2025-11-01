@@ -104,8 +104,10 @@ const prompt = [
 
 export async function router(message, summary) {
 
+  if (logAmount === 2) console.log(`LOG: router.js started`);
+
   // Get past chats
-  const getChats = await message.channel.messages.fetch({ limit: 6 });
+  const getChats = await message.channel.messages.fetch({ limit: 10 });
   const chats = Array.from(getChats.values());
   chats.shift();
   chats.reverse();
