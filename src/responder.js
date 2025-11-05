@@ -1,5 +1,6 @@
 import { logAmount, logResponse } from "../devVariables.js";
 import OpenAI from "openai";
+import { createPlugin } from "./tools/createPlugin.js";
 
 const roleIds = process.env.EVERY_ROLE_ID.split(",");
 const client = new OpenAI;
@@ -77,13 +78,64 @@ Please respond to the **CURRENT USER MESSAGE** to the best of your ability and u
 Your response will be sent on Discord, so feel free to use discord text formatting features like emojis (:emoji_name:), bold text (**text**), 
 italics (*text*), large text(# text), and more in your response.`
 
-const prompt = [
-  { role: "system", content: systemPrompt },
-  { role: "developer", content: developerPrompt },
+const tools = [
+  { type: "web_search" },
+  {
+    type: "function",
+    name: "createPlugin",
+    description: "Compile and build a Paper 1.20.1 Minecraft plugin (Java 17) into a jar.",
+    parameters: {
+      type: "object",
+      properties: {
+        pluginJava: { 
+          type: "string", 
+          description: "The plugin's code. The correct package is: com.walrusmc" 
+        },
+        pluginYML: { 
+          type: "string", 
+          description: "The plugin.yml."
+        },
+        configYML: { 
+          type: "string", 
+          description: "The default config.yml."
+        },
+        pluginVersion: { 
+          type: "string", 
+          description: "The version of the plugin (Like 1.0.0)."
+        },
+        pluginName: { 
+          type: "string", 
+          description: "Name of the plugin. Must be a valid Java class name. This becomes the main class filename, the jar filename, and pom.xml artifactId."
+        },
+        dependencies: { 
+          type: "array", 
+          description: `Optional. Additional Maven dependency XML blocks to insert inside pom.xml <dependencies> 
+          (as raw XML). DO NOT include paper-api or adventure-api (these are already included). Example format:
+          <dependency>
+            <groupId>com.github.placeholderapi</groupId>
+            <artifactId>placeholderapi</artifactId>
+            <version>2.11.5</version>
+            <scope>provided</scope>
+          </dependency>`, 
+          items: { type: "string"} },
+        noteToSelf: { 
+          type: "string",
+          description: `Optional. Information on why it was neccessary to call the tool and insructions to yourself on what to do next.`
+        }
+      },
+      required: ["pluginJava", "pluginYML", "configYML", "pluginVersion", "pluginName"],
+    },
+  },
 ]
 
-export async function responder(model, message) {
-  if (logAmount) console.log(`LOG: gpt-5-nano chose ${model} to handle this message`);
+export async function responder(model, message, summary, assistantMessage = "", extraDeveloperMessage = "") {
+
+  const prompt = [
+    { role: "system", content: systemPrompt },
+    { role: "developer", content: developerPrompt + `\n${extraDeveloperMessage}` },
+  ]
+
+  if (logAmount) console.log(`LOG: responder.js is running with ${model}`);
 
   // Get past chats
   const getChats = await message.channel.messages.fetch({ limit: 10 });
@@ -122,18 +174,31 @@ export async function responder(model, message) {
     input: [
       ...prompt,
       { role: "user", content: userMessages },
+      { role: "assistant", content: `(MEMORY SUMMARY)\n${summary}\n\n${assistantMessage}` },
     ],
     tools: [
-      { type: "web_search" }
-    ],
+      ...tools,
+    ]
   });
 
   if (logResponse && logAmount) console.log(`\n----- BEGIN RESPONDER RESPONSE -----\n\n${JSON.stringify(response, null, 2)}\n\n----- END RESPONDER RESPONSE -----\n`);
 
   const sentMessages = [];
+  const toolCall = response.output.find?.(c => c.type === "function_call" || c.type === "tool_call");
 
-  // Break down and send response
-  if (response.output_text) {
+  if (toolCall) {
+    const args = JSON.parse(toolCall.arguments);
+    switch (toolCall.name) {
+      case "createPlugin":
+        const pluginJarPath = await createPlugin(args.pluginJava, args.pluginYML, args.configYML, args.pluginVersion, args.pluginName, args?.dependencies);
+        return await responder(model, message, summary, args.noteToSelf ? args.notToSelf : "", `(RECENT INFORMATION) You just chose to call the createPlugin 
+          tool and a plugin JAR has been generated for you at this filepath: ${pluginJarPath}` );
+      default:
+        sentMessages.push(await message.channel.send("Oh no! An error has occurred."));
+        console.log("ERR: GPT did not call a valid tool.");
+        return sentMessages;
+    }
+  } else if (response.output_text) {
     if (logAmount >= 2) console.log(`LOG: Recieved response.output_text with a length of ${response.output_text.length} characters`);
 
     const maxLength = 2000;

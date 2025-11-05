@@ -72,7 +72,7 @@ You are the **Reasoning Controller** for Steve, an AI assistant for WalrusMC Eve
 the current user chat channel and summarized them for you so that you know the context of the user input. Should you need to recall exact
 past chats, you have been sent a few of the latest past chats exactly as they are.
 
-Your job is to analyze the user's latest message and take **exactly one** of the following actions, based on the message's complexity and topic.
+Your job is to analyze the **(CURRENT USER MESSAGE)** and take **exactly one** of the following actions, based on the message's complexity and topic.
 
 If the user explicitly specifies a valid GPT model to use ("gpt-5-codex", "gpt-5", or "gpt-5-mini"), then use that model.
 Otherwise, use these guidelines to choose a model:
@@ -173,7 +173,7 @@ export async function router(message, summary) {
     // Call a different model
     const args = JSON.parse(toolCall.arguments);
     if (toolCall.name === "responder") {
-      return await responder(args.model, message);
+      return await responder(args.model, message, summary);
     } else {
       console.log(`ERR: Incorrect function name: ${toolCall.name}`);
       sentMessages.push(await message.channel.send("Oh no! An error has occured."));
