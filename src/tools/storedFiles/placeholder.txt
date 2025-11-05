@@ -1,0 +1,1 @@
+The storedFiles directory is where Steve keeps any stored files he has access to!
