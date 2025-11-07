@@ -1,8 +1,9 @@
 import { logAmount, logResponse } from "../devVariables.js";
 import OpenAI from "openai";
 import { createPlugin } from "./tools/createPlugin.js";
-
-const roleIds = process.env.EVERY_ROLE_ID.split(",");
+import { sendMsgDiscord } from "./tools/sendMsgDiscord.js";
+import { getPastChats } from "./utils/getPastChats.js";
+import fs from "fs/promises";
 const client = new OpenAI;
 
 const systemPrompt = `Any user messaging you is a verified member of the WalrusMC Events Core Team. You are Steve, the official AI assistant for WalrusMC Events — an organization dedicated to hosting 
@@ -73,172 +74,170 @@ chats of the current user chat channel and summarized them for you so that you k
 past chats, you have been sent a few of the latest past chats exactly as they are.
 
 
-Please respond to the **CURRENT USER MESSAGE** to the best of your ability and use any tools at your disposal that you feel are neccessary.
+Please respond to the **CURRENT USER MESSAGE** with the \`respond\` tool to the best of your ability and use any tools at your disposal that you feel are neccessary.
 
 Your response will be sent on Discord, so feel free to use discord text formatting features like emojis (:emoji_name:), bold text (**text**), 
 italics (*text*), large text(# text), and more in your response.`
 
-const tools = [
-  { type: "web_search" },
-  {
-    type: "function",
-    name: "createPlugin",
-    description: "Compile and build a Paper 1.20.1 Minecraft plugin (Java 17) into a jar.",
-    parameters: {
-      type: "object",
-      properties: {
-        pluginJava: { 
-          type: "string", 
-          description: "The plugin's code. The correct package is: com.walrusmc" 
-        },
-        pluginYML: { 
-          type: "string", 
-          description: "The plugin.yml."
-        },
-        configYML: { 
-          type: "string", 
-          description: "The default config.yml."
-        },
-        pluginVersion: { 
-          type: "string", 
-          description: "The version of the plugin (Like 1.0.0)."
-        },
-        pluginName: { 
-          type: "string", 
-          description: "Name of the plugin. Must be a valid Java class name. This becomes the main class filename, the jar filename, and pom.xml artifactId."
-        },
-        dependencies: { 
-          type: "array", 
-          description: `Optional. Additional Maven dependency XML blocks to insert inside pom.xml <dependencies> 
-          (as raw XML). DO NOT include paper-api or adventure-api (these are already included). Example format:
-          <dependency>
-            <groupId>com.github.placeholderapi</groupId>
-            <artifactId>placeholderapi</artifactId>
-            <version>2.11.5</version>
-            <scope>provided</scope>
-          </dependency>`, 
-          items: { type: "string"} },
-        noteToSelf: { 
-          type: "string",
-          description: `Optional. Information on why it was neccessary to call the tool and insructions to yourself on what to do next.`
-        }
-      },
-      required: ["pluginJava", "pluginYML", "configYML", "pluginVersion", "pluginName"],
-    },
-  },
-]
-
-export async function responder(model, message, summary, assistantMessage = "", extraDeveloperMessage = "") {
-
-  const prompt = [
-    { role: "system", content: systemPrompt },
-    { role: "developer", content: developerPrompt + `\n${extraDeveloperMessage}` },
-  ]
-
+export async function responder(model, message, summary, assistantMessage = "", extraDeveloperMessage = "", overrideDevMessage = false) {
   if (logAmount) console.log(`LOG: responder.js is running with ${model}`);
 
-  // Get past chats
-  const getChats = await message.channel.messages.fetch({ limit: 10 });
-  const chats = Array.from(getChats.values());
-  chats.shift();
-  chats.reverse();
-  let chatString = "";
-  let lengthCounter = 0; // Stores total chat character count
-
-  // Add all messages to chatString in this format: (ROLE)(USERNAME)(USERID)MESSAGE\n
-  for (const chat of chats) {
-    lengthCounter += chat.content.length;
-    if (lengthCounter < 2002) {
-      let role;
-
-      await message.guild.members.fetch(chat.author.id);
-
-      if (chat.member && roleIds.some(role => chat.member.roles.cache.has(role))) {
-        role = "CORE TEAM";
-      } else {
-        role = "NOT CORE TEAM";
-      }
-
-      chatString += `UTC_TIME:${chat.createdAt.toISOString()}|ROLE:${role}|USERNMAME:${chat.author.username}|USER_ID:${chat.author.id}|CHAT:${chat.content}\n`;
-    }
+  // Constants
+  const files = JSON.parse(await fs.readFile("./db/files.json", "utf-8"))
+  const fileNames = Object.keys(files);
+  const pastChats = await getPastChats(message)
+  const userInput = `(PAST CHATS)\n${pastChats}\n(CURRENT USER MESSAGE)UTC_TIME:${message.createdAt.toISOString()}|ROLE:CORE TEAM|USERNMAME:${message.author.username}|USER_ID:${message.author.id}|CHAT:${message.content}\n`;
+  let developerFiles = files.length ? "\n\n(FILES YOU HAVE ACCESS TO)\n" : "";
+  for (const fileName in fileNames) {
+    developerFiles += `${fileName}: ${files[fileName]}\n`;
   }
-
-  // Put together the user input
-  const userMessages = `(PAST CHATS)\n${chatString}\n(CURRENT USER MESSAGE)UTC_TIME:${message.createdAt.toISOString()}|ROLE:CORE TEAM|USERNMAME:${message.author.username}|USER_ID:${message.author.id}|CHAT:${message.content}\n`;
-
-  if (logAmount === 2) console.log(`----- BEGIN PAST CHATS -----\n\n${userMessages}\n\n----- END PAST CHATS -----`);
+  const tools = [
+    { type: "web_search" },
+    {
+      type: "function",
+      name: "createPlugin",
+      description: "Compile and build a Paper 1.20.1 Minecraft plugin (Java 17) into a jar. Keep in mind that the plugin is created with paper 1.20.1.",
+      parameters: {
+        type: "object",
+        properties: {
+          pluginJava: { 
+            type: "string", 
+            description: "The plugin's code. The correct package is: com.walrusmc. ",
+          },
+          pluginYML: { 
+            type: "string", 
+            description: "The plugin.yml.",
+          },
+          configYML: { 
+            type: "string", 
+            description: "The default config.yml.",
+          },
+          pluginVersion: { 
+            type: "string", 
+            description: "The version of the plugin (Like 1.0.0).",
+          },
+          pluginName: { 
+            type: "string", 
+            description: "Name of the plugin. Must be a valid Java class name. This becomes the main class filename, the jar filename, and pom.xml artifactId.",
+          },
+          dependencies: { 
+            type: "array", 
+            description: `Optional. Additional Maven dependency XML blocks to insert inside pom.xml <dependencies> 
+            (as raw XML). DO NOT include paper-api (1.20.1) or adventure-api (these are already included), but include any other dependencies your code requires. Example format:
+            <dependency>
+              <groupId>com.github.placeholderapi</groupId>
+              <artifactId>placeholderapi</artifactId>
+              <version>2.11.5</version>
+              <scope>provided</scope>
+            </dependency>`, 
+            items: { type: "string", description: "A single Maven <dependency>...</dependency> XML block as raw text."},
+          },
+          noteToSelf: { 
+            type: "string",
+            description: `Optional. Information on why it was neccessary to call the tool and insructions to yourself on what to do next.`,
+          },
+        },
+        required: ["pluginJava", "pluginYML", "configYML", "pluginVersion", "pluginName"],
+      },
+    },
+    {
+      type: "function",
+      name: "respond",
+      description: "Respond to the user message.",
+      parameters: {
+        type: "object",
+        properties: {
+          responseText: {
+            type: "string",
+            description: "The textual response that will be sent to the user.",
+          },
+          files: {
+            type: "array",
+            description: "Optional. An array of the names of all files to send.",
+            items: { 
+              type: "string",
+              enum: fileNames,
+              description: "The name of the file you wish to send."
+            },
+          },
+        },
+        required: ["responseText"],
+      },
+    },
+  ]
 
   // Send request to OpenAI API
+  if (logAmount === 2) console.log(`----- BEGIN OPENAI INPUT -----\n\n|SYSTEM|\n${systemPrompt}\n|DEVELOPER|\n${overrideDevMessage ? overrideDevMessage : developerPrompt + developerFiles + extraDeveloperMessage}\n|USER|\n${userInput}\n|ASSISTANT|\n(MEMORY SUMMARY)\n${summary}\n\n${assistantMessage}\n----- END OPENAI INPUT -----`);
   const response = await client.responses.create({
     model: model,
     input: [
-      ...prompt,
-      { role: "user", content: userMessages },
+      { role: "system", content: systemPrompt },
+      { role: "developer", content: overrideDevMessage ? overrideDevMessage : `${developerPrompt}${developerFiles}${extraDeveloperMessage}` },
+      { role: "user", content: userInput },
       { role: "assistant", content: `(MEMORY SUMMARY)\n${summary}\n\n${assistantMessage}` },
     ],
-    tools: [
-      ...tools,
-    ]
+    tools: tools
   });
+  if (logResponse && logAmount) console.log(`\n----- BEGIN RESPONDER RESPONSE -----\n\n${JSON.stringify(response, null, 2)}\n\n----- END RESPONDER RESPONSE -----\n`); // LOG
 
-  if (logResponse && logAmount) console.log(`\n----- BEGIN RESPONDER RESPONSE -----\n\n${JSON.stringify(response, null, 2)}\n\n----- END RESPONDER RESPONSE -----\n`);
-
-  const sentMessages = [];
+  // Call tools
   const toolCall = response.output.find?.(c => c.type === "function_call" || c.type === "tool_call");
-
   if (toolCall) {
     const args = JSON.parse(toolCall.arguments);
     switch (toolCall.name) {
       case "createPlugin":
-        const pluginJarPath = await createPlugin(args.pluginJava, args.pluginYML, args.configYML, args.pluginVersion, args.pluginName, args?.dependencies);
-        return await responder(model, message, summary, args.noteToSelf ? args.notToSelf : "", `(RECENT INFORMATION) You just chose to call the createPlugin 
-          tool and a plugin JAR has been generated for you at this filepath: ${pluginJarPath}` );
+        const result = await createPlugin(args.pluginJava, args.pluginYML, args.configYML, args.pluginVersion, args.pluginName, args?.dependencies);
+        if (result.success) {
+          files[result.file] = "A Minecraft plugin JAR.";
+          await fs.writeFile("./db/files.json", JSON.stringify(files, null, 2));
+          return await responder(model, message, summary, args.noteToSelf ? `(NOTE TO SELF)\n${args.noteToSelf}` : "", `(RECENT INFORMATION)\n
+            You just chose to call the createPlugin tool in order to answer the CURRENT USER MESSAGE and a plugin JAR has been generated for you: ${result.file}\n\n` );
+        } else {
+          const ovrdDevMsg = `A reasoning controller for you, Steve, an AI Agent Assistant for WalrusMC Events, 
+has already chosen to send this user message to this specific gpt model based on user request or complexity of the message. A memory summarizer has taken past Discord 
+chats of the current user chat channel and summarized them for you so that you know the context of the user input. Should you need to recall exact
+past chats, you have been sent a few of the latest past chats exactly as they are.
+
+
+Please respond to the **CURRENT USER MESSAGE** to the best of your ability and use any tools at your disposal that you feel are neccessary.
+
+Your response will be sent on Discord, so feel free to use discord text formatting features like emojis (:emoji_name:), bold text (**text**), 
+italics (*text*), large text(# text), and more in your response.
+
+(RECENT INFORMATION)
+In order to answer the CURRENT USER MESSAGE, you just chose to call the createPlugin tool and the tool crashed while trying to build the plugin. 
+You called the createPlugin tool with these parameters:
+----- BEGINNING OF PARAMETERS -----
+----- pluginName -----
+${args.pluginName}
+----- pluginVersion -----
+${args.pluginVersion}
+----- pluginJava (Main file code) -----
+${args.pluginJava}
+----- pluginYML (code for the plugin.yml) -----
+${args.pluginYML}
+----- configYML (code for the config.yml) -----
+${args.configYML}
+----- dependencies (array of raw text Maven pom.xml <dependency>...</dependency> XML blocks) -----
+${args.dependencies}
+----- END OF PARAMETERS -----
+
+This is the error Maven threw after crashing:
+----- BEGINNING OF MAVEN ERROR REPORT -----
+${result.error}
+----- END OF MAVEN ERROR REPORT -----
+`;
+          return await responder(model, message, summary, assistantMessage, extraDeveloperMessage, ovrdDevMsg);
+        }
+      case "respond":
+        return await sendMsgDiscord(args.responseText, message, args.files);
       default:
-        sentMessages.push(await message.channel.send("Oh no! An error has occurred."));
         console.log("ERR: GPT did not call a valid tool.");
-        return sentMessages;
-    }
-  } else if (response.output_text) {
-    if (logAmount >= 2) console.log(`LOG: Recieved response.output_text with a length of ${response.output_text.length} characters`);
-
-    const maxLength = 2000;
-    const separator = "\n"
-    let responsePiece = response.output_text; // Response to be broken down into messageSections[]
-    const messageSections = []; // Array to store all message sections
-
-    // While responsePiece is still a non-empty string
-    while(responsePiece) {
-      // If responsePiece.length > maxLength
-      // Take responsePiece[0] through responsePiece[index of the nearest character to the maxLength right before the separator]
-      if (responsePiece?.length > maxLength) {
-        if (logAmount === 2) console.log("LOG: Splitting response.output_text");
-
-        messageSections.push(
-          responsePiece.substring(
-            0,
-            responsePiece.lastIndexOf(separator, maxLength)
-          )
-        )
-      } else {
-        // Add the remaining characters in responsePiece to messageSections[]
-        messageSections.push(responsePiece);
-        responsePiece = false;
-        break;
-      }
-
-      // Remove responsePiece[0] through responsePiece[index of last character of the separator]
-      responsePiece = responsePiece?.slice(responsePiece?.lastIndexOf(separator, maxLength) + 1);
+        return await sendMsgDiscord("Oh no! An error has occured.", message);
     }
 
-    for (const messageSection of messageSections) {
-      if (logAmount === 2) console.log(`LOG: Sending a message with a length of ${messageSection.length} characters`);
-      sentMessages.push(await message.channel.send(messageSection));
-    }
-    return sentMessages;
-    
   } else {
-    console.log("ERR: GPT did not send a valid response or call a tool!");
-    sentMessages.push(await message.channel.send("Oh no! An error has occurred."));
-    return sentMessages;
+    console.log("ERR: GPT did not call a tool!");
+    return await sendMsgDiscord("Oh no! An error has occured.", message);
   }
 };

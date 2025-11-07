@@ -84,10 +84,10 @@ export async function createPlugin(pluginJava, pluginYML, configYML, pluginVersi
 
 
   // Generate directory
-  await fs.mkdir(path.join(__dirname, "pluginBuilder"));
+  await fs.mkdir(path.join(__dirname, "pluginBuilder"), { recursive: true });
   await fs.mkdir(path.join(__dirname, "pluginBuilder/src"));
   await fs.mkdir(path.join(__dirname, "pluginBuilder/src/main"));
-    await fs.mkdir(path.join(__dirname, "pluginBuilder/src/main/resources"));
+  await fs.mkdir(path.join(__dirname, "pluginBuilder/src/main/resources"));
   await fs.mkdir(path.join(__dirname, "pluginBuilder/src/main/java"));
   await fs.mkdir(path.join(__dirname, "pluginBuilder/src/main/java/com"));
   await fs.mkdir(path.join(__dirname, "pluginBuilder/src/main/java/com/walrusmc"));
@@ -104,7 +104,16 @@ export async function createPlugin(pluginJava, pluginYML, configYML, pluginVersi
   // pom.xml
   await fs.writeFile(path.join(__dirname, "pluginBuilder/pom.xml"), pomXML);
 
-  await run("mvn -f src/tools/pluginBuilder/pom.xml clean package");
+  try {
+    await run("mvn -f src/tools/pluginBuilder/pom.xml clean package");
+  } catch (err) {
+    await fs.rm(path.join(__dirname, "pluginBuilder"), { recursive: true } );
+    return {
+      success: false,
+      error: err.stderr || err.stdout || err.message,
+    };
+  }
+
   const files = await fs.readdir(path.join(__dirname, "pluginBuilder/target"));
   let fileJarName = "";
 
@@ -114,10 +123,13 @@ export async function createPlugin(pluginJava, pluginYML, configYML, pluginVersi
     }
   }
 
-  await fs.rename(path.join(__dirname, `pluginBuilder/target/${fileJarName}`), path.join(__dirname, `storedFiles/${fileJarName}`));
+  await fs.rename(path.join(__dirname, `pluginBuilder/target/${fileJarName}`), path.join(__dirname, `storedFiles/${pluginName}-${pluginVersion}.jar`));
 
   await fs.rm(path.join(__dirname, "pluginBuilder"), { recursive: true } );
 
-  return path.join(__dirname, `storedFiles/${fileJarName}`);
+  return { 
+    success: true,
+    file: fileJarName,
+  };
 
 };

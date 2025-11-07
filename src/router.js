@@ -1,8 +1,10 @@
 import { logAmount, logResponse } from "../devVariables.js";
 import OpenAI from "openai";
 import { responder } from "./responder.js";
+import { sendMsgDiscord } from "./tools/sendMsgDiscord.js";
+import { getPastChats } from "./utils/getPastChats.js";
+import fs from "fs/promises";
 
-const roleIds = process.env.EVERY_ROLE_ID.split(",");
 const client = new OpenAI;
 
 const systemPrompt = `Any user messaging you is a verified member of the WalrusMC Events Core Team. You are Steve, the official AI assistant for WalrusMC Events — an organization dedicated to hosting 
@@ -80,76 +82,39 @@ Otherwise, use these guidelines to choose a model:
 - **gpt-5-codex** → Use for advanced, multi-step coding or plugin development tasks that require reasoning, planning, or multiple code files.
 - **gpt-5** → Use for highly technical, highly analytical, or large multi-step reasoning tasks (e.g., automations, system design, complex logic, or deep technical help).
 - **gpt-5-mini** → Use for general or moderately complex tasks, code snippets, or informational queries.
-- **gpt-5-nano** → Use for short, direct, and simple questions that can be answered conversationally. If the user asks you to do something that you don't have the ability to do, **NEVER** choose "gpt-5-nano" to respond. Instead, choose a different model, as they have access to a broader variety of tools.
-
-
+- **gpt-5-nano** → Use for short, direct, and simple questions that can be answered conversationally. Do not use if the user is asking you to do something you can't do.
+ 
 Please perform **exactly one** of these actions:
-1. If you chose either "gpt-5-codex", "gpt-5", or "gpt-5-mini", call the \`responder\` tool with the model you have selected.
-2. Or, if you chose "gpt-5-nano", respond yourself with **less than 2000 characters** of text.
+1. If you chose either "gpt-5-codex", "gpt-5", or "gpt-5-mini", call the \`forward\` tool with the model you have selected.
+2. Or, if you chose "gpt-5-nano", and you are able to do everything the user asks, call the \`respond\` tool to respond yourself.
 
 When responding yourself, your response will be sent on Discord, so feel free to use discord text formatting features like emojis (:emoji_name:), 
 bold text (**text**), italics (*text*), large text(# text), and more. 
 
 Do not explain your reasoning.
 Do not call more than one tool.
-Do not output anything except your chosen tool call or your final message.
+Do not output anything except your chosen tool call.
+If you ever find yourself about to say “I cannot,” “I don’t have access,” or any similar disclaimer, STOP and instead call the \`forward\` tool with "gpt-5-mini" unless the user explicitly requested a different model. You are never allowed to respond with an apology, limitation, or disclaimer.
+You are part of a multi-model system. Do not mention your own capabilities or limitations. Either respond confidently yourself, or silently forward the message to a model that can handle it.
 `
 
-
-
-const prompt = [
-  { role: "system", content: systemPrompt },
-  { role: "developer", content: developerPrompt }
-];
-
 export async function router(message, summary) {
-
   if (logAmount === 2) console.log(`LOG: router.js started`);
 
-  // Get past chats
-  const getChats = await message.channel.messages.fetch({ limit: 10 });
-  const chats = Array.from(getChats.values());
-  chats.shift();
-  chats.reverse();
-  let chatString = "";
-  let lengthCounter = 0; // Stores total chat character count
-
-  // Add all messages to chatString in this format: (ROLE)(USERNAME)(USERID)MESSAGE\n
-  for (const chat of chats) {
-    lengthCounter += chat.content.length;
-    if (lengthCounter < 2002) {
-      let role;
-
-      await message.guild.members.fetch(chat.author.id);
-
-      if (chat.member && roleIds.some(role => chat.member.roles.cache.has(role))) {
-        role = "CORE TEAM";
-      } else {
-        role = "NOT CORE TEAM";
-      }
-
-      chatString += `UTC_TIME:${chat.createdAt.toISOString()}|ROLE:${role}|USERNMAME:${chat.author.username}|USER_ID:${chat.author.id}|CHAT:${chat.content}\n`;
-    }
+  // Constants
+  const files = JSON.parse(await fs.readFile("./db/files.json", "utf-8"))
+  const fileNames = Object.keys(files);
+  const pastChats = await getPastChats(message)
+  const userInput = `(PAST CHATS)\n${pastChats}\n(CURRENT USER MESSAGE)UTC_TIME:${message.createdAt.toISOString()}|ROLE:CORE TEAM|USERNMAME:${message.author.username}|USER_ID:${message.author.id}|CHAT:${message.content}\n`;
+  let developerFiles = files.length ? "\n\n(FILES YOU HAVE ACCESS TO)\n" : "";
+  for (const fileName in fileNames) {
+    developerFiles += `${fileName}: ${files[fileName]}\n`;
   }
-
-  // Put together the user input
-  const userMessages = `(PAST CHATS)\n${chatString}\n(CURRENT USER MESSAGE)UTC_TIME:${message.createdAt.toISOString()}|ROLE:CORE TEAM|USERNMAME:${message.author.username}|USER_ID:${message.author.id}|CHAT:${message.content}\n`;
-
-  if (logAmount === 2) console.log(`----- BEGIN PAST CHATS -----\n\n${userMessages}\n\n----- END PAST CHATS -----`);
-
-  // Send request to OpenAI API
-  if (logAmount === 2) console.log("LOG: Sent initial request to gpt-5-nano");
-  const response = await client.responses.create({
-    model: "gpt-5-nano",
-    input: [
-      ...prompt,
-      { role: "user", content: userMessages },
-      { role: "assistant", content: `(MEMORY SUMMARY)\n${summary}` },
-    ],
-    tools: [{
+  const tools = [
+    {
       type: "function",
-      name: "responder",
-      description: "Forward the message to a specified GPT model",
+      name: "forward",
+      description: "Forward the message to a specified GPT model.",
       parameters: {
         type: "object",
         properties: {
@@ -157,43 +122,63 @@ export async function router(message, summary) {
         },
         required: ["model"],
       },
-    }],
-  });
+    },
+    {
+      type: "function",
+      name: "respond",
+      description: "Respond yourself with gpt-5-nano.",
+      parameters: {
+        type: "object",
+        properties: {
+          responseText: { 
+            type: "string", 
+            description: "The textual response that will be sent to the user."},
+          files: { 
+            type: "array",
+            description: "Optional. An array of any files that need to be sent to the user.",
+            items: { 
+              type: "string",
+              enum: fileNames,
+              description: "The name of the file you wish to send."
+            },
+          },
+        },
+        required: ["responseText"],
+      },
+    },
+  ];
 
+  // Send request to OpenAI API
+  if (logAmount === 2) console.log("LOG: Sent initial request to gpt-5-nano");
+  if (logAmount === 2) console.log(`----- BEGIN OPENAI INPUT -----\n\n|SYSTEM|\n${systemPrompt}\n|DEVELOPER|\n${developerPrompt}${developerFiles}\n|USER|\n${userInput}\n|ASSISTANT|\n(MEMORY SUMMARY)\n${summary}\n----- END OPENAI INPUT -----`);
+  const response = await client.responses.create({
+    model: "gpt-5-nano",
+    input: [
+      { role: "system", content: systemPrompt },
+      { role: "developer", content: developerPrompt + developerFiles },
+      { role: "user", content: userInput },
+      { role: "assistant", content: `(MEMORY SUMMARY)\n${summary}` },
+    ],
+    tools: tools
+  });
   if (logResponse && logAmount) console.log(`\n----- BEGIN ROUTER RESPONSE -----\n\n${JSON.stringify(response, null, 2)}\n\n----- END ROUTER RESPONSE -----\n`);
 
+  // Call tools
   const toolCall = response.output.find?.(c => c.type === "function_call" || c.type === "tool_call");
-  const responseMessage = response.output[1]?.content?.filter?.(c => c.type === "output_text" || c.type === "text");
-  const fullResponseMessage = responseMessage?.map?.(c => c.text)?.join?.("\n");
-
-  const sentMessages = [];
   if (toolCall) {
-    if (logAmount === 2) console.log("LOG: gpt-5-nano chose to call a different model");
-
-    // Call a different model
     const args = JSON.parse(toolCall.arguments);
-    if (toolCall.name === "responder") {
+    if (toolCall.name === "forward") {
+      if (logAmount === 2) console.log("LOG: gpt-5-nano chose to call a different model");
       return await responder(args.model, message, summary);
+    } else if (toolCall.name === "respond") {
+      return await sendMsgDiscord(args.responseText, message, args.files);
     } else {
       console.log(`ERR: Incorrect function name: ${toolCall.name}`);
-      sentMessages.push(await message.channel.send("Oh no! An error has occured."));
-      return sentMessages;
-    }
-  } else if (fullResponseMessage?.length) {
-    if (logAmount === 2) console.log(`LOG: gpt-5-nano chose to send a response of ${response.output_text.length} characters`);
-
-    // Send response message
-    if (fullResponseMessage.length < 2001) {
-      sentMessages.push(await message.channel.send(fullResponseMessage));
-      return sentMessages;
-    } else {
-      console.log("ERR: Sent over 2000 characters of text");
+      return await sendMsgDiscord("Oh no! An error has occured.", message);
     }
   } else {
-    // Error handling
-    sentMessages.push(await message.channel.send("Oh no! An error has occured."));
-    console.log(`ERR: GPT did not call a tool or send a valid response!`)
-    return sentMessages;
+    console.log(`ERR: GPT did not call a tool or send a valid response!`);
+    return await sendMsgDiscord("Oh no! An error has occured.", message);
   }
 
 };
