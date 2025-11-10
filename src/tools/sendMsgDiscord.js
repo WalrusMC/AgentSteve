@@ -1,28 +1,32 @@
 import { logAmount } from "../../devVariables.js";
 import path from "path";
 import { fileURLToPath } from 'url';
+import { createLogger } from "../utils/logger.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+const log = createLogger("sendMsgDiscord");
 
 const maxLength = 2000;
 const separator = "\n"
 
+/**
+ * Sends one or more Discord messages, splitting long content at newline boundaries
+ * to respect the 2000-character limit. Optionally attaches files from storedFiles.
+ */
 export async function sendMsgDiscord(msgToSend, initiatingMsg, files = false) {
-  const messageSections = []; // Array to store all message sections
-  const sentMessages = []; // Array to store final message sections
+  const messageSections = [];
+  const sentMessages = [];
 
   if (!files.length) files = false;
   if (files) files.forEach((element, index) => {
     files[index] = path.join(__dirname, "storedFiles", element);
   });
 
-  // While msgToSend is still a non-empty string
+  // While content remains, split on the nearest newline under 2000 chars
   while(msgToSend) {
-    // If msgToSend.length > maxLength
-    // Take msgToSend[0] through msgToSend[index of the nearest character to the maxLength right before the separator]
     if (msgToSend?.length > maxLength) {
-      if (logAmount === 2) console.log("LOG: Splitting message to send.");
+      log.debug("Splitting long message for Discord limit");
 
       messageSections.push(
         msgToSend.substring(
@@ -31,18 +35,18 @@ export async function sendMsgDiscord(msgToSend, initiatingMsg, files = false) {
         )
       )
     } else {
-      // Add the remaining characters in msgToSend to messageSections[]
+      // Push the final remaining section
       messageSections.push(msgToSend);
       msgToSend = false;
       break;
     }
 
-    // Remove msgToSend[0] through msgToSend[index of last character of the separator]
+    // Remove the portion we just sent (including the newline)
     msgToSend = msgToSend?.slice(msgToSend?.lastIndexOf(separator, maxLength) + 1);
   }
 
   for (const messageSection of messageSections) {
-    if (logAmount === 2) console.log(`LOG: Sending a message with a length of ${messageSection.length} characters`);
+    log.debug(`Sending section (${messageSection.length} chars)`);
     sentMessages.push(await initiatingMsg.channel.send(messageSection));
   }
 

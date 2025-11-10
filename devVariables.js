@@ -1,2 +1,5 @@
-export const logAmount = 2; // 0 = very few, 1 = some, 2 = many
-export const logResponse = true; // Choose whether to log OpenAI's response
+// Logging configuration:
+// - logAmount: 0 = errors and warnings only; 1 = +info; 2 = +debug (most verbose)
+// - logResponse: when true and logAmount > 0, prints full OpenAI responses/payloads
+export const logAmount = 2;
+export const logResponse = true;

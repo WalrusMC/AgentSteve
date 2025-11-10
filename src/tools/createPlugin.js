@@ -3,12 +3,18 @@ import { promisify } from "util";
 import fs from "fs/promises";
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { createLogger } from "../utils/logger.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+const log = createLogger("createPlugin");
 
 const run = promisify(exec);
 
+/**
+ * Builds a simple Paper plugin JAR using Maven.
+ * Returns { success: boolean, file?: string, error?: string }
+ */
 export async function createPlugin(pluginJava, pluginYML, configYML, pluginVersion, pluginName, dependencies) {
 
   let fullDependencies = "";
@@ -83,7 +89,7 @@ export async function createPlugin(pluginJava, pluginYML, configYML, pluginVersi
   `
 
 
-  // Generate directory
+  // Generate temp build directory structure
   await fs.mkdir(path.join(__dirname, "pluginBuilder"), { recursive: true });
   await fs.mkdir(path.join(__dirname, "pluginBuilder/src"));
   await fs.mkdir(path.join(__dirname, "pluginBuilder/src/main"));
@@ -105,8 +111,10 @@ export async function createPlugin(pluginJava, pluginYML, configYML, pluginVersi
   await fs.writeFile(path.join(__dirname, "pluginBuilder/pom.xml"), pomXML);
 
   try {
+    log.info(`Building plugin ${pluginName}-${pluginVersion}.jar`);
     await run("mvn -f src/tools/pluginBuilder/pom.xml clean package");
   } catch (err) {
+    log.error("Maven build failed:", err?.stderr || err?.stdout || err?.message || err);
     await fs.rm(path.join(__dirname, "pluginBuilder"), { recursive: true } );
     return {
       success: false,
@@ -127,6 +135,7 @@ export async function createPlugin(pluginJava, pluginYML, configYML, pluginVersi
 
   await fs.rm(path.join(__dirname, "pluginBuilder"), { recursive: true } );
 
+  log.info(`Built plugin JAR: ${fileJarName}`);
   return { 
     success: true,
     file: fileJarName,

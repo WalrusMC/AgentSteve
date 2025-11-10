@@ -1,6 +1,9 @@
-import { logAmount } from "../../devVariables.js";
+import { isUserAllowed } from "./whitelist.js";
 
-const roleIds = process.env.EVERY_ROLE_ID.split(",");
+/**
+ * Returns a compact string of recent chats in the channel (excluding the triggering message)
+ * for context, newest-last, limited to ~2000 characters.
+ */
 
 export async function getPastChats(message) {
   const getChats = await message.channel.messages.fetch({ limit: 10 });
@@ -13,17 +16,20 @@ export async function getPastChats(message) {
   for (const chat of chats) {
     lengthCounter += chat.content.length;
     if (lengthCounter < 2002) {
-      let role;
-
-      await message.guild.members.fetch(chat.author.id);
-
-      if (chat.member && roleIds.some(role => chat.member.roles.cache.has(role))) {
-        role = "CORE TEAM";
-      } else {
-        role = "NOT CORE TEAM";
+      let person = {};
+      try {
+        person.member = await message.guild.members.fetch(chat.author.id);
+        person.username = chat.author.username;
+        person.id = chat.author.id;
+        person.role = await isUserAllowed(member, chat.guildId) ? "ADMINISTRATOR" : "NOT ADMINISTRATOR";
+      } catch {
+        person.member = false;
+        person.username = "UNKNOWN USER";
+        person.id = "UNKNOW ID";
+        person.role = "NOT ADMINISTRATOR"
       }
 
-      chatString = `UTC_TIME:${chat.createdAt.toISOString()}|ROLE:${role}|USERNMAME:${chat.author.username}|USER_ID:${chat.author.id}|CHAT:${chat.content}\n` + chatString;
+      chatString = `UTC_TIME:${chat.createdAt.toISOString()}|ROLE:${person.role}|USERNMAME:${person.username}|USER_ID:${person.id}|CHAT:${chat.content}\n` + chatString;
     }
   }
 

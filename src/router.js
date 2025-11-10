@@ -4,8 +4,10 @@ import { responder } from "./responder.js";
 import { sendMsgDiscord } from "./tools/sendMsgDiscord.js";
 import { getPastChats } from "./utils/getPastChats.js";
 import fs from "fs/promises";
+import { createLogger } from "./utils/logger.js";
 
 const client = new OpenAI;
+const log = createLogger("router");
 
 const systemPrompt = `Any user messaging you is a verified member of the WalrusMC Events Core Team. You are Steve, the official AI assistant for WalrusMC Events — an organization dedicated to hosting 
 large-scale, high-quality Minecraft events. Your job is to assist staff with information, event management, and 
@@ -98,16 +100,24 @@ If you ever find yourself about to say “I cannot,” “I don’t have access,
 You are part of a multi-model system. Do not mention your own capabilities or limitations. Either respond confidently yourself, or silently forward the message to a model that can handle it.
 `
 
+/**
+ * Routes a Discord message to the appropriate model or responds directly.
+ * - Uses gpt-5-nano as a lightweight "reasoning controller" to either forward
+ *   to a bigger model or answer directly when trivial.
+ */
 export async function router(message, summary) {
-  if (logAmount === 2) console.log(`LOG: router.js started`);
+  log.debug("Router started for message", message.id);
 
   // Constants
-  const files = JSON.parse(await fs.readFile("./db/files.json", "utf-8"))
+  const files = JSON.parse(await fs.readFile(`./db/${message.guildId}/files.json`, "utf-8"));
   const fileNames = Object.keys(files);
-  const pastChats = await getPastChats(message)
-  const userInput = `(PAST CHATS)\n${pastChats}\n(CURRENT USER MESSAGE)UTC_TIME:${message.createdAt.toISOString()}|ROLE:CORE TEAM|USERNMAME:${message.author.username}|USER_ID:${message.author.id}|CHAT:${message.content}\n`;
-  let developerFiles = files.length ? "\n\n(FILES YOU HAVE ACCESS TO)\n" : "";
-  for (const fileName in fileNames) {
+  const pastChats = await getPastChats(message);
+  const attachmentNames = message?.attachments?.size
+    ? Array.from(message.attachments.values()).map(a => a.name).join(",")
+    : "";
+  const userInput = `(PAST CHATS)\n${pastChats}\n(CURRENT USER MESSAGE)UTC_TIME:${message.createdAt.toISOString()}|ROLE:CORE TEAM|USERNMAME:${message.author.username}|USER_ID:${message.author.id}|CHAT:${message.content}${attachmentNames ? `|ATTACHMENTS:${attachmentNames}` : ""}\n`;
+  let developerFiles = fileNames.length ? "\n\n(FILES YOU HAVE ACCESS TO)\n" : "";
+  for (const fileName of fileNames) {
     developerFiles += `${fileName}: ${files[fileName]}\n`;
   }
   const tools = [
@@ -148,9 +158,9 @@ export async function router(message, summary) {
     },
   ];
 
-  // Send request to OpenAI API
-  if (logAmount === 2) console.log("LOG: Sent initial request to gpt-5-nano");
-  if (logAmount === 2) console.log(`----- BEGIN OPENAI INPUT -----\n\n|SYSTEM|\n${systemPrompt}\n|DEVELOPER|\n${developerPrompt}${developerFiles}\n|USER|\n${userInput}\n|ASSISTANT|\n(MEMORY SUMMARY)\n${summary}\n----- END OPENAI INPUT -----`);
+  // Send initial route decision request to OpenAI
+  log.debug("Sending routing request to gpt-5-nano");
+  log.response("OPENAI INPUT (ROUTER)", `|SYSTEM|\n${systemPrompt}\n|DEVELOPER|\n${developerPrompt}${developerFiles}\n|USER|\n${userInput}\n|ASSISTANT|\n(MEMORY SUMMARY)\n${summary}`);
   const response = await client.responses.create({
     model: "gpt-5-nano",
     input: [
@@ -161,23 +171,23 @@ export async function router(message, summary) {
     ],
     tools: tools
   });
-  if (logResponse && logAmount) console.log(`\n----- BEGIN ROUTER RESPONSE -----\n\n${JSON.stringify(response, null, 2)}\n\n----- END ROUTER RESPONSE -----\n`);
+  log.response("ROUTER RESPONSE", response);
 
   // Call tools
   const toolCall = response.output.find?.(c => c.type === "function_call" || c.type === "tool_call");
   if (toolCall) {
     const args = JSON.parse(toolCall.arguments);
     if (toolCall.name === "forward") {
-      if (logAmount === 2) console.log("LOG: gpt-5-nano chose to call a different model");
+      log.info("Forwarding to model:", args.model);
       return await responder(args.model, message, summary);
     } else if (toolCall.name === "respond") {
       return await sendMsgDiscord(args.responseText, message, args.files);
     } else {
-      console.log(`ERR: Incorrect function name: ${toolCall.name}`);
+      log.error(`Incorrect function name: ${toolCall.name}`);
       return await sendMsgDiscord("Oh no! An error has occured.", message);
     }
   } else {
-    console.log(`ERR: GPT did not call a tool or send a valid response!`);
+    log.error("GPT did not call a tool or send a valid response!");
     return await sendMsgDiscord("Oh no! An error has occured.", message);
   }
 

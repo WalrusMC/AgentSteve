@@ -1,9 +1,10 @@
-import { logAmount, logResponse } from "../devVariables.js";
 import OpenAI from "openai";
 import fs from "fs/promises";
+import { createLogger } from "./utils/logger.js";
+import { getPastChats } from "./utils/getPastChats.js";
 
 const client = new OpenAI;
-const roleIds = process.env.EVERY_ROLE_ID.split(",");
+const log = createLogger("summarizer");
 
 const systemPrompt = `You are Steve, the official AI assistant for WalrusMC Events — an organization dedicated to hosting 
 large-scale, high-quality Minecraft events. Your username is Agent Steve#0091 and your user id is 1424553419909107833. Your job is to respond 
@@ -75,11 +76,11 @@ Every chat message you receive will be formatted as such, in order from oldest t
 (ROLE)(USERNAME)(USERID)MESSAGE
 
 Possible User Roles:
-- CORE TEAM
-- NOT CORE TEAM
+- ADMINISTRATOR
+- NOT ADMINISTRATOR
 
 Example Summarization:
-Two users, heliumdotxd (CORE TEAM) and .alphapancake (NOT CORE TEAM) are hosting a SkyWars tournament.
+Two users, heliumdotxd (ADMINISTRATOR) and .alphapancake (NOT ADMINISTRATOR) are hosting a SkyWars tournament.
 - I am managing registrations.
 - The event starts Friday at 6 PM EST.
 
@@ -96,51 +97,29 @@ const prompts = [
   { role: "developer", content: developerPrompt },
 ]
 
+/**
+ * Creates and stores a concise summary of recent channel messages to provide
+ * conversational context for Steve.
+ */
 export async function summarizer(message) {
+  log.debug("Summarizing recent chat history");
 
-  const senderRole = roleIds.some(role => message.member.roles.cache.has(role)) ? "CORE TEAM" : "NOT CORE TEAM";
-
-  if (logAmount === 2) console.log("LOG: Summarizing chat history");
-
-  const getChats = await message.channel.messages.fetch({ limit: 30 });
-  const chats = Array.from(getChats.values());
-  chats.shift();
-  chats.reverse();
-  let chatString = "";
-  let lengthCounter = 0; // Stores total chat character count
-
-  // Add all messages to chatString in this format: (ROLE)(USERNAME)(USERID)MESSAGE\n
-  for (const chat of chats) {
-    lengthCounter += chat.content.length;
-    if (lengthCounter < 30000) {
-      let role;
-
-      await message.guild.members.fetch(chat.author.id);
-
-      if (chat.member && roleIds.some(role => chat.member.roles.cache.has(role))) {
-        role = "CORE TEAM";
-      } else {
-        role = "NOT CORE TEAM";
-      }
-
-      chatString += `(${role})(${chat.author.username})(${chat.author.id})${chat.content}\n`;
-    }
-  }
+  const pastChats = await getPastChats(message);
 
   const response = await client.responses.create({
     model: "gpt-5-nano",
     input: [
       ...prompts,
-      { role: "user", content: `(Current User Message)${message.content}\n\n(MEMORY)\n${chatString}`},
+      { role: "user", content: `(Current User Message)${message.content}\n\n(MEMORY)\n${pastChats}`},
     ],
   });
 
-  if (logResponse && logAmount) console.log(`\n----- BEGIN SUMMARIZER RESPONSE -----\n\n${JSON.stringify(response, null, 2)}\n\n----- END SUMMARIZER RESPONSE -----\n`);
+  log.response("SUMMARIZER RESPONSE", response);
 
-  const summaries = JSON.parse(await fs.readFile("./db/summaries.json", "utf-8"));
+  const summaries = JSON.parse(await fs.readFile(`./db/${message.guildId}/summaries.json`, "utf-8"));
 
   summaries[message.channel.id] = response.output_text;
 
-  await fs.writeFile("./db/summaries.json", JSON.stringify(summaries, null, 2));
+  await fs.writeFile(`./db/${message.guildId}/summaries.json`, JSON.stringify(summaries, null, 2));
 
 }
