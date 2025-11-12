@@ -15,7 +15,7 @@ const run = promisify(exec);
  * Builds a simple Paper plugin JAR using Maven.
  * Returns { success: boolean, file?: string, error?: string }
  */
-export async function createPlugin(pluginJava, pluginYML, configYML, pluginVersion, pluginName, dependencies) {
+export async function createPlugin(pluginJava, pluginYML, configYML, pluginVersion, pluginName, dependencies, guildId) {
 
   let fullDependencies = "";
   if (dependencies) for (const dependency of dependencies) {
@@ -131,7 +131,7 @@ export async function createPlugin(pluginJava, pluginYML, configYML, pluginVersi
     }
   }
 
-  await fs.rename(path.join(__dirname, `pluginBuilder/target/${fileJarName}`), path.join(__dirname, `storedFiles/${pluginName}-${pluginVersion}.jar`));
+  await fs.rename(path.join(__dirname, `pluginBuilder/target/${fileJarName}`), path.join(__dirname, `storedFiles/${guildId}/${pluginName}-${pluginVersion}.jar`));
 
   await fs.rm(path.join(__dirname, "pluginBuilder"), { recursive: true } );
 

@@ -43,35 +43,68 @@ const commands = [
   },
 ];
 
-// Startup confirmation once Discord client is ready
+/**
+ * On Bot Startup
+ * Register Commands
+ * Ensure Databases Are Created
+ */
 client.once("clientReady", async (readyClient) => {
   log.info(`Ready! Logged in as ${readyClient.user.tag}`);
+  // Ensure commands exist in all guilds the bot is currently in
+  try {
+    for (const g of readyClient.guilds.cache.values()) {
+      await g.commands.set(commands);
+      log.info(`Registered commands in guild ${g.id}`);
+      try { 
+        await fs.access(`./db/${g.id}`);
+      } catch {
+        await fs.mkdir(`./db/${g.id}`);
+        await fs.writeFile(`./db/${g.id}/files.json`, "{}");
+        await fs.writeFile(`./db/${g.id}/summaries.json`, "{}");   
+        await fs.writeFile(`./db/${g.id}/whitelist.json`, JSON.stringify({ users: [], roles: [] }, null, 2));
+        await fs.mkdir(`./src/tools/storedFiles/${g.id}`);
+        log.info(`Created database for guild ${g.id}`);
+      }
+    }
+  } catch (e) {
+    log.error("Failed to register commands or create databases on ready:", e?.message || e);
+  }
 });
 
-// Register commands on server join
+/**
+ * On Guild Join
+ * Register commands
+ * Create databases
+ */
 client.on("guildCreate", async guild => {
   await guild.commands.set(commands);
+  log.info(`Registered commands in guild ${guild.id}`);
+  try { 
+    await fs.access(`./db/${guild.id}`);
+  } catch {
+    await fs.mkdir(`./db/${guild.id}`);
+    await fs.writeFile(`./db/${guild.id}/files.json`, "{}");
+    await fs.writeFile(`./db/${guild.id}/summaries.json`, "{}");   
+    await fs.writeFile(`./db/${guild.id}/whitelist.json`, JSON.stringify({ users: [], roles: [] }, null, 2));
+    await fs.mkdir(`./src/tools/storedFiles/${guild.id}`);
+    log.info(`Created database for guild ${guild.id}`);
+  }
 });
 
 // Login
 client.login(process.env.TOKEN);
 
-let currentlyRunning = false;
+let currentlyRunning = {};
 
 client.on("messageCreate", async (message) => {
   if (message.author.bot) return;
   if (message.mentions.everyone) return;
+  if (!message.mentions.has(client.user)) return;
+  if (currentlyRunning[`${message.guildId}`]) return message.channel.send("Slow down there! I can only answer one question at a time.");
   const allowed = await isUserAllowed(message.member, message.guildId);
-  if (allowed && message.mentions.has(client.user) && !currentlyRunning) {
-    try { 
-      await fs.access(`./db/${message.guildId}`);
-    } catch {
-      await fs.mkdir(`./db/${message.guildId}`);
-      await fs.writeFile(`./db/${message.guildId}/files.json`, "{}");
-      await fs.writeFile(`./db/${message.guildId}/summaries.json`, "{}");   
-      await fs.writeFile(`./db/${message.guildId}/whitelist.json`, JSON.stringify({ users: [], roles: [] }, null, 2));
-    }
-    currentlyRunning = true;
+  if (allowed && message.mentions.has(client.user)) {
+    currentlyRunning[`${message.guildId}`] = true;
+
     log.debug("User pinged Steve and has correct permissions");
   
     // Make bot say typing while it generates a response
@@ -86,7 +119,7 @@ client.on("messageCreate", async (message) => {
     try {
       if (message.attachments?.size) {
         log.info(`Found ${message.attachments.size} attachment(s); downloading...`);
-        const storedDir = path.join(process.cwd(), "src", "tools", "storedFiles");
+        const storedDir = path.join(process.cwd(), "src", "tools", "storedFiles", message.guildId);
         try { await fs.mkdir(storedDir, { recursive: true }); } catch {}
 
         const filesIndexPath = path.join(process.cwd(), "db", message.guildId, "files.json");
@@ -151,7 +184,7 @@ client.on("messageCreate", async (message) => {
     log.debug("Cleared typing interval");
     clearInterval(typingInterval);
 
-    currentlyRunning = false;
+    currentlyRunning[`${message.guildId}`] = false;
 
   }
 })
@@ -174,12 +207,12 @@ client.on("interactionCreate", async (interaction) => {
       if (sub === "user") {
         const target = interaction.options.getUser("target", true);
         await allowUser(target.id, interaction.guildId);
-        return interaction.reply({ content: `Allowed user <@${target.id}> to use Steve.`, ephemeral: true });
+        return interaction.reply({ content: `Allowed user <@${target.id}> to use Steve.`, flags: MessageFlags.Ephemeral });
       }
       if (sub === "role") {
         const target = interaction.options.getRole("target", true);
         await allowRole(target.id, interaction.guildId);
-        return interaction.reply({ content: `Allowed role <@&${target.id}> to use Steve.`, ephemeral: true });
+        return interaction.reply({ content: `Allowed role <@&${target.id}> to use Steve.`, eflags: MessageFlags.Ephemeral });
       }
     }
 
@@ -187,18 +220,18 @@ client.on("interactionCreate", async (interaction) => {
       if (sub === "user") {
         const target = interaction.options.getUser("target", true);
         await disallowUser(target.id, interaction.guildId);
-        return interaction.reply({ content: `Disallowed user <@${target.id}> from using Steve.`, ephemeral: true });
+        return interaction.reply({ content: `Disallowed user <@${target.id}> from using Steve.`, flags: MessageFlags.Ephemeral });
       }
       if (sub === "role") {
         const target = interaction.options.getRole("target", true);
         await disallowRole(target.id, interaction.guildId);
-        return interaction.reply({ content: `Disallowed role <@&${target.id}> from using Steve.`, ephemeral: true });
+        return interaction.reply({ content: `Disallowed role <@&${target.id}> from using Steve.`, flags: MessageFlags.Ephemeral });
       }
     }
   } catch (e) {
     log.error("Slash command error:", e?.message || e);
     if (interaction.isRepliable()) {
-      try { await interaction.reply({ content: "Error processing command.", ephemeral: true }); } catch {}
+      try { await interaction.reply({ content: "Error processing command.", flags: MessageFlags.Ephemeral }); } catch {}
     }
   }
 });

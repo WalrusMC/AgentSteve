@@ -31,14 +31,14 @@ export async function isUserAllowed(member, guildId) {
 
 export async function allowUser(userId, guildId) {
   const wl = await loadWhitelist(guildId);
-  if (!wl.users.includes(userId)) wl.users.push(userId, guildId);
+  if (!wl.users.includes(userId)) wl.users.push(userId);
   await saveWhitelist(wl, guildId);
   return wl;
 }
 
 export async function allowRole(roleId, guildId) {
   const wl = await loadWhitelist(guildId);
-  if (!wl.roles.includes(roleId)) wl.roles.push(roleId, guildId);
+  if (!wl.roles.includes(roleId)) wl.roles.push(roleId);
   await saveWhitelist(wl, guildId);
   return wl;
 }
@@ -51,9 +51,8 @@ export async function disallowUser(userId, guildId) {
 }
 
 export async function disallowRole(roleId, guildId) {
-  const wl = await loadWhitelist();
+  const wl = await loadWhitelist(guildId);
   wl.roles = wl.roles.filter((id) => id !== roleId);
   await saveWhitelist(wl, guildId);
   return wl;
 }
-

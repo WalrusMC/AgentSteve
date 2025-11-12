@@ -18,9 +18,9 @@ export async function sendMsgDiscord(msgToSend, initiatingMsg, files = false) {
   const messageSections = [];
   const sentMessages = [];
 
-  if (!files.length) files = false;
+  if (!files || !files.length) files = false;
   if (files) files.forEach((element, index) => {
-    files[index] = path.join(__dirname, "storedFiles", element);
+    files[index] = path.join(__dirname, "storedFiles", initiatingMsg.guildId, element);
   });
 
   // While content remains, split on the nearest newline under 2000 chars
