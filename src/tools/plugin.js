@@ -136,12 +136,12 @@ async function buildJAR(pluginName, pluginVersion, pluginJava, pluginYML, config
     return {
       success: false,
       error: err.stderr || err.stdout || err.message,
-      name: pluginName,
+      pluginName: pluginName,
       version: pluginVersion,
       code: {
-        java: pluginJava,
-        yml: pluginYML,
-        config: configYML,
+        pluginJava: pluginJava,
+        pljuginYML: pluginYML,
+        configYML: configYML,
         dependencies: dependenciesArray
       },
     };
@@ -154,7 +154,6 @@ async function buildJAR(pluginName, pluginVersion, pluginJava, pluginYML, config
  * Creates a new plugin and returns buildJAR
  */
 plugin.createNew = async function(pluginName, pluginDescription, pluginJava, pluginYML, configYML = "# No config right now", dependencies = [], guildId) {
-
   if (!configYML?.length) configYML = "# No config right now";
 
   // Create GitHub Repo
@@ -521,7 +520,7 @@ plugin.retrieveCode = async function(pluginName, files, guildId) {
 /**
  * generates a plugin crash report
  */
-plugin.crashReport = function(name, version, code, error) {
+plugin.crashReport = function(pluginName, version, code, error) {
 
   // Add line numbers to files
   if (code?.pluginJava) {
@@ -533,7 +532,7 @@ plugin.crashReport = function(name, version, code, error) {
     }
     code.pluginJava = lines;
   } else {
-    code.pluginJava = `Could not find ${name}.java`;
+    code.pluginJava = `Could not find ${pluginName}.java`;
   }
 
   if (code?.pluginYML) {

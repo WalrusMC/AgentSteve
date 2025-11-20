@@ -31,25 +31,24 @@ Rules (ordered by priority):
     id: 1,
     condition: "The message requires multi-step procedural reasoning with dependent steps, OR involves multiple server interactions (files, commands, or logs), OR requires iterative validation or testing.",
     examples: ["Test this plugin on the server", "Scan for bugs and apply fixes", "Optimize performance after analyzing server logs"],
-    action: "complex"
+    action: "complex()"
   },
   {
     id: 2,
     condition: "The message requests structured planning, step-by-step instruction, brainstorming, code creation or modification, non-iterative server operations, or single-result data retrieval.",
     examples: ["Give 10 plugin ideas", "Modify this plugin so that...", "Create a new plugin that...", "Start the server", "How many players are online?"],
-    action: "moderate"
+    action: "moderate()"
   },
   {
     id: 3,
     condition: "The message is conversational, emotional, opinion-based, or informational, and can be answered within ~7 sentences or less, with no code or tools required.",
     examples: ["How are you?", "What is PaperMC?", "What's your opinion on Purpur vs Paper?"],
-    action: "respond"
+    action: "respond()"
   }
 ]
 
 Fallback rule:
 If uncertain, **choose the rule with higher complexity rather than lower (1 > 2 > 3)**.
-
 
 When responding yourself, your response will be sent on Discord, so feel free to use discord text formatting features like emojis (:emoji_name:), 
 bold text (**text**), italics (*text*), large text(# text), and more. 
@@ -146,25 +145,38 @@ export async function router(message, summary) {
   log.response("ROUTER RESPONSE", response);
 
   // Call tools
-  const toolCall = response.output.find?.(c => c.type === "function_call" || c.type === "tool_call");
+  const toolCall = response?.output?.find?.(c => c.type === "function_call" || c.type === "tool_call");
+  const responseText = response?.output?.[1]?.content?.[0]?.text;
   if (toolCall) {
     const args = JSON.parse(toolCall.arguments);
     switch (toolCall.name) {
       case "respond":
-        log.debug("gpt-5-nano chose to respond itself.");
+        log.debug("The router chose to respond itself.");
         return sendMsgDiscord(args.responseText, message, args.files);
       case "moderate":
-        log.debug("gpt-5-nano evaluated the message as moderately complex");
+        log.debug("The router evaluated the message as moderately complex");
         return moderate(message, summary);
       case "complex":
-        log.debug("gpt-5-nano evaluated the message as complex",);
+        log.debug("The router evaluated the message as complex",);
         return sendMsgDiscord("This message is very complex, and I'm going to send it the Workflow Orchestrator.", message);
       default:
-        log.error("GPT did not call a valid tool.")
+        log.error("The router did not call a valid tool.")
         return await sendMsgDiscord("Oh no! An error has occured.", message);
     }
+  } else if (responseText) {
+    switch (responseText) {
+      case "moderate":
+        log.warn("The router returned output text and evaluated the message as moderately complex");
+        return moderate(message, summary);
+      case "complex":
+        log.warn("The router returned output text and evaluated the message as complex",);
+        return sendMsgDiscord("This message is very complex, and I'm going to send it the Workflow Orchestrator.", message);
+      default:
+        log.warn("The router returned output text: sending text to the user.");
+        return sendMsgDiscord(responseText, message);
+    }
   } else {
-    log.error("GPT did not call a tool.");
+    log.error("The router did not call a tool or return output text.");
     return await sendMsgDiscord("Oh no! An error has occured.", message);
   }
 

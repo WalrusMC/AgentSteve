@@ -53,7 +53,6 @@ BEHAVIOR RULES
 - When uncertain of user intent, request clarification with clarify().
 - You may use Discord formatting (bold, italics, inline code, code blocks, emoji)
   inside respond() to improve readability.
-
 `;
 
 /**
@@ -289,9 +288,10 @@ export async function moderate(message, summary, toolHistory = []) {
           return moderate(message, summary, toolHistory);
         }
       case "clarify":
-        data = await sendMsgDiscord(args.question);
+        await sendMsgDiscord(args.question, message);
         return {
-          clarify: true
+          clarify: true,
+          type: "moderate"
         };
       default:
         log.error("GPT did not call a valid tool.");
