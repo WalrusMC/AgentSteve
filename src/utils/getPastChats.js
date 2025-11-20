@@ -1,7 +1,7 @@
 import { isUserAllowed } from "./whitelist.js";
 
 /**
- * Returns a compact string of recent chats in the channel (excluding the triggering message)
+ * Returns an array of past chat objects.
  * for model context. Newest messages appear last. Limited to ~2000 chars.
  * Labels senders as ADMINISTRATOR if they are whitelisted (aligned with prompts).
  */
@@ -11,7 +11,7 @@ export async function getPastChats(message) {
   let chats = Array.from(getChats.values());
   chats.sort((a, b) => b.createdTimestamp - a.createdTimestamp );
   chats = chats.filter(c => c.id !== message.id);
-  let chatString = "";
+  let chatArray = [];
   let lengthCounter = 0;
 
   for (const chat of chats) {
@@ -23,20 +23,30 @@ export async function getPastChats(message) {
         person.member = await message.guild.members.fetch(chat.author.id);
         person.username = chat.author.username;
         person.id = chat.author.id;
-        // Treat whitelisted users as ADMINISTRATORfor context labelling
-        person.role = (await isUserAllowed(person.member, message.guildId)) ? "ADMINISTRATOR" : "NOT ADMINISTRATOR";
+        // Treat whitelisted users as ADMINISTRATOR for context labelling
+        person.role = (await isUserAllowed(person.member, message.guildId)) ? true : false;
       } catch {
         // Fall back if the member is not resolvable (e.g., left server)
         person.member = null;
         person.username = chat.author?.username || "UNKNOWN USER";
         person.id = chat.author?.id || "UNKNOWN ID";
-        person.role = "NOT ADMINISTRATOR";
+        person.role = false;
       }
 
-      chatString = `UTC_TIME:${chat.createdAt.toISOString()}|ROLE:${person.role}|USERNMAME:${person.username}|USER_ID:${person.id}|CHAT:${chat.content}\n` + chatString;
+      chatArray.push(
+        {
+          time: chat.createdAt.toISOString(),
+          author: {
+            id: person.id,
+            username: person.username,
+            isAdministrator: person.role
+          },
+          content: chat.content
+        }
+      );
     }
   }
 
-  return chatString;
+  return chatArray;
 
 };

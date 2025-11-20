@@ -1,9 +1,10 @@
 import OpenAI from "openai";
-import { responder } from "./responder.js";
+import fs from "fs/promises";
 import { sendMsgDiscord } from "./tools/sendMsgDiscord.js";
 import { getPastChats } from "./utils/getPastChats.js";
-import fs from "fs/promises";
 import { createLogger } from "./utils/logger.js";
+import { moderate } from "./moderate.js";
+import { workflowOrchestrator } from "./complex/workflowOrchestrator.js";
 
 const client = new OpenAI;
 const log = createLogger("router");
@@ -20,24 +21,35 @@ Behavior:
 `;
 
 const developerPrompt = `
-You are the **Reasoning Controller** for a multi-model system, called Steve, an AI assistant for Minecraft server owners. 
-A memory summarizer has taken past Discord chats of the current user chat channel and summarized them for you so 
-that you know the context of the user input. Should you need to recall exact past chats, you have been sent a 
-few of the latest past chats exactly as they are.
+Your job is to analyze the **currentUserMessage** and choose **exactly one** action.
+When multiple rules apply, select the rule with the **highest priority (1 = highest)**.
+Return only the action name and proceed with that action.
 
-Your job is to analyze the **(CURRENT USER MESSAGE)** and take **exactly one** of the following actions, based on the message's complexity and topic.
+Rules (ordered by priority):
+[
+  {
+    id: 1,
+    condition: "The message requires multi-step procedural reasoning with dependent steps, OR involves multiple server interactions (files, commands, or logs), OR requires iterative validation or testing.",
+    examples: ["Test this plugin on the server", "Scan for bugs and apply fixes", "Optimize performance after analyzing server logs"],
+    action: "complex"
+  },
+  {
+    id: 2,
+    condition: "The message requests structured planning, step-by-step instruction, brainstorming, code creation or modification, non-iterative server operations, or single-result data retrieval.",
+    examples: ["Give 10 plugin ideas", "Modify this plugin so that...", "Create a new plugin that...", "Start the server", "How many players are online?"],
+    action: "moderate"
+  },
+  {
+    id: 3,
+    condition: "The message is conversational, emotional, opinion-based, or informational, and can be answered within ~7 sentences or less, with no code or tools required.",
+    examples: ["How are you?", "What is PaperMC?", "What's your opinion on Purpur vs Paper?"],
+    action: "respond"
+  }
+]
 
-If the user explicitly specifies a valid GPT model to use ("gpt-5-codex", "gpt-5", or "gpt-5-mini"), then use that model.
-Otherwise, use these guidelines to choose a model:
+Fallback rule:
+If uncertain, **choose the rule with higher complexity rather than lower (1 > 2 > 3)**.
 
-- **gpt-5-codex** → Use for advanced, multi-step coding or plugin development tasks that require reasoning, planning, or multiple code files.
-- **gpt-5** → Use for highly technical, highly analytical, or large multi-step reasoning tasks (e.g., automations, system design, complex logic, or deep technical help).
-- **gpt-5-mini** → Use for general or moderately complex tasks, code snippets, or informational queries.
-- **gpt-5-nano** → Use for short, direct, and simple questions that can be answered conversationally. Do not use if the user is asking you to do something you can't do.
- 
-Please perform **exactly one** of these actions:
-1. If you chose either "gpt-5-codex", "gpt-5", or "gpt-5-mini", call the \`forward\` tool with the model you have selected.
-2. Or, if you chose "gpt-5-nano", and you are able to do everything the user asks, call the \`respond\` tool to respond yourself.
 
 When responding yourself, your response will be sent on Discord, so feel free to use discord text formatting features like emojis (:emoji_name:), 
 bold text (**text**), italics (*text*), large text(# text), and more. 
@@ -45,7 +57,7 @@ bold text (**text**), italics (*text*), large text(# text), and more.
 Do not explain your reasoning.
 Do not call more than one tool.
 Do not output anything except your chosen tool call.
-If you ever find yourself about to say “I cannot,” “I don’t have access,” or any similar disclaimer, STOP and instead call the \`forward\` tool with "gpt-5-mini" unless the user explicitly requested a different model. You are never allowed to respond with an apology, limitation, or disclaimer.
+If you ever find yourself about to say “I cannot,” “I don’t have access,” or any similar disclaimer, STOP and instead call the moderate tool. You are never allowed to respond with an apology, limitation, or disclaimer.
 You are part of a multi-model system. Do not mention your own capabilities or limitations. Either respond confidently yourself, or silently forward the message to a model that can handle it.
 `
 
@@ -57,35 +69,37 @@ You are part of a multi-model system. Do not mention your own capabilities or li
 export async function router(message, summary) {
   log.debug("Router started for message", message.id);
 
-  // Constants
+  // Files
   const files = JSON.parse(await fs.readFile(`./db/${message.guildId}/files.json`, "utf-8"));
   const fileNames = Object.keys(files);
-  const pastChats = await getPastChats(message);
-  const attachmentNames = message?.attachments?.size
-    ? Array.from(message.attachments.values()).map(a => a.name).join(",")
-    : "";
-  const userInput = `(PAST CHATS)\n${pastChats}\n(CURRENT USER MESSAGE)UTC_TIME:${message.createdAt.toISOString()}|ROLE:ADMINISTRATOR|USERNMAME:${message.author.username}|USER_ID:${message.author.id}|CHAT:${message.content}${attachmentNames ? `|ATTACHMENTS:${attachmentNames}` : ""}\n`;
   let developerFiles = fileNames.length ? "\n\n(FILES YOU HAVE ACCESS TO)\n" : "";
   for (const fileName of fileNames) {
     developerFiles += `${fileName}: ${files[fileName]}\n`;
   }
+
+  // Chats
+  const pastChats = await getPastChats(message);
+  const attachmentNames = message?.attachments?.size
+    ? Array.from(message.attachments.values()).map(a => a.name)
+    : [];
+  const currentUserMessage = {
+    time: message.createdAt.toISOString(),
+    author: {
+      id: message.author.id,
+      username: message.author.username,
+      isAdministrator: true
+    },
+    content: message.content,
+    attachments: attachmentNames ? attachmentNames : []
+  };
+  const userInput = `(PAST CHATS)\n${JSON.stringify(pastChats, null, 2)}\n(CURRENT USER MESSAGE)\n${JSON.stringify(currentUserMessage, null, 2)}`;
+  
+  // Tools
   const tools = [
     {
       type: "function",
-      name: "forward",
-      description: "Forward the message to a specified GPT model.",
-      parameters: {
-        type: "object",
-        properties: {
-          model: { type: "string", enum: [ "gpt-5-codex", "gpt-5", "gpt-5-mini" ] },
-        },
-        required: ["model"],
-      },
-    },
-    {
-      type: "function",
       name: "respond",
-      description: "Respond yourself with gpt-5-nano.",
+      description: "Respond yourself.",
       parameters: {
         type: "object",
         properties: {
@@ -105,7 +119,16 @@ export async function router(message, summary) {
         required: ["responseText"],
       },
     },
+    {
+      type: "function",
+      name: "moderate",
+    },
+    {
+      type: "function",
+      name: "complex",
+    },
   ];
+
 
   // Send initial route decision request to OpenAI
   log.debug("Sending routing request to gpt-5-nano");
@@ -126,17 +149,22 @@ export async function router(message, summary) {
   const toolCall = response.output.find?.(c => c.type === "function_call" || c.type === "tool_call");
   if (toolCall) {
     const args = JSON.parse(toolCall.arguments);
-    if (toolCall.name === "forward") {
-      log.info("Forwarding to model:", args.model);
-      return await responder(args.model, message, summary);
-    } else if (toolCall.name === "respond") {
-      return await sendMsgDiscord(args.responseText, message, args.files);
-    } else {
-      log.error(`Incorrect function name: ${toolCall.name}`);
-      return await sendMsgDiscord("Oh no! An error has occured.", message);
+    switch (toolCall.name) {
+      case "respond":
+        log.debug("gpt-5-nano chose to respond itself.");
+        return sendMsgDiscord(args.responseText, message, args.files);
+      case "moderate":
+        log.debug("gpt-5-nano evaluated the message as moderately complex");
+        return moderate(message, summary);
+      case "complex":
+        log.debug("gpt-5-nano evaluated the message as complex",);
+        return sendMsgDiscord("This message is very complex, and I'm going to send it the Workflow Orchestrator.", message);
+      default:
+        log.error("GPT did not call a valid tool.")
+        return await sendMsgDiscord("Oh no! An error has occured.", message);
     }
   } else {
-    log.error("GPT did not call a tool or send a valid response!");
+    log.error("GPT did not call a tool.");
     return await sendMsgDiscord("Oh no! An error has occured.", message);
   }
 

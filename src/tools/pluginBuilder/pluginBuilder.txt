@@ -1,0 +1,1 @@
+Stores temporary plugin source files for building into a JAR.
