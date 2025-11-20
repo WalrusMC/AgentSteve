@@ -160,8 +160,19 @@ client.on("messageCreate", async (message) => {
     summarizer(message);
 
     // Respond to user request
+    let sentMessages;
     const summaries = JSON.parse(await fs.readFile(`./db/${message.guildId}/summaries.json`, "utf8"));
-    const sentMessages = await router(message, summaries[message.channel.id] ? summaries[message.channel.id] : "NO PAST SUMMARIZATION FOUND!");
+
+    const clarification = clarifications?.find( obj => obj.guildId === message.guildId) ? clarifications.find( obj => obj.guildId === message.guildId) : false;
+    if (clarification?.type === "moderate") {
+      sentMessages = await moderate(message, summaries[message.channel.id]);
+      clarifications.splice(indexOf(clarification), 1);
+    } else if (clarification?.type === "complex") {
+      sentMessages = [await message.channel.send("Placeholder")];
+      clarifications.splice(indexOf(clarification), 1);
+    } else {
+      sentMessages = await router(message, summaries[message.channel.id] ? summaries[message.channel.id] : "NO PAST SUMMARIZATION FOUND!");
+    }
 
     if (sentMessages.clarify) {
       // Check if the message is a clarification message

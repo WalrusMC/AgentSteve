@@ -41,7 +41,8 @@ export async function getPastChats(message) {
             username: person.username,
             isAdministrator: person.role
           },
-          content: chat.content
+          content: chat.content,
+          attachments: message?.attachments?.map?.(attachment => attachment?.name)?.length ? message.attachments.map(attachment => attachment.name) : "No attachments"
         }
       );
     }

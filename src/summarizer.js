@@ -58,7 +58,7 @@ export async function summarizer(message) {
     model: "gpt-5-nano",
     input: [
       ...prompts,
-      { role: "user", content: `(Current User Message)${message.content}\n\n(MEMORY)\n${pastChats}`},
+      { role: "user", content: `(Current User Message)${message.content}\n\n(MEMORY)\n${JSON.stringify(pastChats, null, 2)}`},
     ],
   });
 
