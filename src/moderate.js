@@ -68,7 +68,7 @@ export async function moderate(message, summary, toolHistory = []) {
   // Chats
   const pastChats = await getPastChats(message);
   const attachmentNames = message?.attachments?.size
-    ? Array.from(message.attachments.values()).map(a => a.name)
+    ? message.attachments.map(att => att.name)
     : [];
   const currentUserMessage = {
     time: message.createdAt.toISOString(),
@@ -78,7 +78,7 @@ export async function moderate(message, summary, toolHistory = []) {
       isAdministrator: true
     },
     content: message.content,
-    attachments: attachmentNames ? attachmentNames : []
+    attachments: attachmentNames
   };
   const userInput = `(PAST CHATS)\n${JSON.stringify(pastChats, null, 2)}\n(CURRENT USER MESSAGE)\n${JSON.stringify(currentUserMessage, null, 2)}`;
 
