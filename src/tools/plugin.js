@@ -269,6 +269,9 @@ plugin.edit = async function(pluginName, pluginDescription, deletions = [], inse
   const dependenciesToRemove = Array.isArray(removeDependencies) ? [...removeDependencies] : [];
   const pluginsDbPath = path.join("db", guildId, "plugins.json");
 
+  const pluginInfo = JSON.parse(await fs.readFile(`./db/${guildId}/plugins.json`, "utf8")).find(obj => obj.name === pluginName);
+  if (!pluginDescription?.length) pluginDescription = pluginInfo.description;
+
   let pluginsDb = [];
   try {
     pluginsDb = JSON.parse(await fs.readFile(pluginsDbPath, "utf8"));
@@ -407,7 +410,6 @@ plugin.edit = async function(pluginName, pluginDescription, deletions = [], inse
 
   const pluginRecord = {
     name: pluginName,
-    pluginName,
     version: pluginVersion,
     description: pluginDescription
   };
@@ -430,6 +432,8 @@ plugin.retrieveCode = async function(pluginName, files, guildId) {
 
   let code = {};
 
+  pluginInfo = JSON.parse(await fs.readFile(`./db/${guildId}/plugins.json`, "utf8")).find(obj => obj.name === pluginName);
+  pluginDescription = pluginInfo.description;
   code.pluginJava = files.includes("pluginJava") ? await getFile(pluginName, `src/main/java/com/agentsteveofficial/${pluginName}.java`, guildId) : false;
   code.pluginYML = files.includes("pluginYML") ? await getFile(pluginName, `src/main/resources/plugin.yml`, guildId) : false;
   code.configYML = files.includes("configYML") ? await getFile(pluginName, "src/main/resources/config.yml", guildId) : false;
@@ -510,6 +514,7 @@ plugin.retrieveCode = async function(pluginName, files, guildId) {
 
   return JSON.stringify({
     pluginName,
+    pluginDescription: pluginDescription,
     pluginJava: code.pluginJava,
     pluginYML: code.pluginYML,
     configYML: code.configYML,
@@ -520,8 +525,9 @@ plugin.retrieveCode = async function(pluginName, files, guildId) {
 /**
  * generates a plugin crash report
  */
-plugin.crashReport = function(pluginName, version, code, error) {
-
+plugin.crashReport = async function(pluginName, version, code, error) {
+  pluginInfo = JSON.parse(await fs.readFile(`./db/${guildId}/plugins.json`, "utf8")).find(obj => obj.name === pluginName);
+  pluginDescription = pluginInfo.description;
   // Add line numbers to files
   if (code?.pluginJava) {
     let counter = 0;
@@ -563,6 +569,7 @@ return `Here is the crash report, code, and plugin information:
 ----- BEGINNING OF PLUGIN INFO -----
 ${JSON.stringify({
     pluginName,
+    pluginDescription,
     pluginJava: code.pluginJava,
     pluginYML: code.pluginYML,
     configYML: code.configYML,

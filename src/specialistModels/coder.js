@@ -34,7 +34,7 @@ export async function coder(job, pluginName, message, assistantMessage, model, i
         properties: {
           pluginDescription: {
             type: "string",
-            description: "A 1-4 sentence description of the plugin.",
+            description: "A 1-5 sentence description of the plugin.",
           },
           pluginJava: {
             type: "string",
@@ -79,7 +79,7 @@ export async function coder(job, pluginName, message, assistantMessage, model, i
           properties: {
             pluginDescription: {
               type: "string",
-              description: "A 1-4 sentence description of the plugin.",
+              description: "Optional. A new 1-5 sentence description of the plugin. If this is ommitted, the original description will be used.",
             },
             deletions: {
               type: "array",
@@ -209,7 +209,7 @@ export async function coder(job, pluginName, message, assistantMessage, model, i
           return coder("fixCrash", pluginName, message, assistantMessage, "gpt-5.1-codex", plugin.crashReport(pluginName, data.version, data.code, data.error));
         }
       case "editPlugin":
-        data = await plugin.edit(pluginName, args.pluginDescription, args?.deletions, args?.insertions, args?.addDependencies, args?.removeDependencies, message.guildId);
+        data = await plugin.edit(pluginName, args?.pluginDescription, args?.deletions, args?.insertions, args?.addDependencies, args?.removeDependencies, message.guildId);
         if (data.success) {
           return data;
         } else {

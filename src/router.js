@@ -79,7 +79,7 @@ export async function router(message, summary) {
   // Chats
   const pastChats = await getPastChats(message);
   const attachmentNames = message?.attachments?.size
-    ? Array.from(message.attachments.values()).map(a => a.name)
+    ? message.attachments.map(att => att.name)
     : [];
   const currentUserMessage = {
     time: message.createdAt.toISOString(),
@@ -89,10 +89,19 @@ export async function router(message, summary) {
       isAdministrator: true
     },
     content: message.content,
-    attachments: attachmentNames ? attachmentNames : []
+    attachments: attachmentNames
   };
   const userInput = `(PAST CHATS)\n${JSON.stringify(pastChats, null, 2)}\n(CURRENT USER MESSAGE)\n${JSON.stringify(currentUserMessage, null, 2)}`;
   
+  // Plugins + versions + descriptions the model can reference quickly
+  let pluginRegistry = [];
+  try {
+    pluginRegistry = JSON.parse(await fs.readFile(`./db/${message.guildId}/plugins.json`, "utf-8"));
+  } catch {
+    pluginRegistry = [];
+  }
+  let developerPlugins = pluginRegistry.length ? `\n\n(MINECRAFT PLUGINS YOU HAVE ACCESS TO)\n${JSON.stringify(pluginRegistry, null, 2)}` : "";
+
   // Tools
   const tools = [
     {
@@ -131,12 +140,12 @@ export async function router(message, summary) {
 
   // Send initial route decision request to OpenAI
   log.debug("Sending routing request to gpt-5-nano");
-  log.response("OPENAI INPUT (ROUTER)", `|SYSTEM|\n${systemPrompt}\n|DEVELOPER|\n${developerPrompt}${developerFiles}\n|USER|\n${userInput}\n|ASSISTANT|\n(MEMORY SUMMARY)\n${summary}`);
+  log.response("OPENAI INPUT (ROUTER)", `|SYSTEM|\n${systemPrompt}\n|DEVELOPER|\n${developerPrompt + developerFiles + developerPlugins}\n|USER|\n${userInput}\n|ASSISTANT|\n(MEMORY SUMMARY)\n${summary}`);
   const response = await client.responses.create({
     model: "gpt-5-nano",
     input: [
       { role: "system", content: systemPrompt },
-      { role: "developer", content: developerPrompt + developerFiles },
+      { role: "developer", content: developerPrompt + developerFiles + developerPlugins },
       { role: "user", content: userInput },
       { role: "assistant", content: `(MEMORY SUMMARY)\n${summary}` },
     ],

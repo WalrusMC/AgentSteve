@@ -17,6 +17,9 @@ export async function getPastChats(message) {
   for (const chat of chats) {
     lengthCounter += chat.content.length;
     if (lengthCounter < 2002) {
+      const attachmentNames = chat?.attachments?.size
+        ? chat.attachments.map(att => att.name)
+        : [];
       const person = {};
       try {
         // Ensure we can inspect roles/whitelist for this author
@@ -33,7 +36,7 @@ export async function getPastChats(message) {
         person.role = false;
       }
 
-      chatArray.push(
+      chatArray.unshift(
         {
           time: chat.createdAt.toISOString(),
           author: {
@@ -42,7 +45,7 @@ export async function getPastChats(message) {
             isAdministrator: person.role
           },
           content: chat.content,
-          attachments: message?.attachments?.map?.(attachment => attachment?.name)?.length ? message.attachments.map(attachment => attachment.name) : "No attachments"
+          attachments: attachmentNames
         }
       );
     }
