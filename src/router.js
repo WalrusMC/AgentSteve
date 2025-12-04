@@ -15,7 +15,7 @@ and accurate. Keep your answers concise unless the user asks for detailed guidan
 questions, aim for 2-4 short paragraphs or less. Offer to elaborate if needed.
 
 Behavior:
-- You may choose to use your assistant (MEMORY SUMMARY) and your user (PAST CHATS) when it is applicable to the current user message, otherwise respond neutrally.
+- You may choose to use your assistant memorySummary and your user pastChats when it is applicable to the currentUserMessage, otherwise respond neutrally.
 - If uncertain about an event or detail, clarify that information may need verification through official sources.
 `;
 
@@ -65,21 +65,17 @@ You are part of a multi-model system. Do not mention your own capabilities or li
  *   to a bigger model or answer directly when trivial.
  */
 export async function router(info) {
-  const { message } = info;
-  const { pastChats } = info;
-  const { summary } = info;
+  const { message } = info; // {Object}
+  const { pastChats } = info; // [Array]
+  const { summary } = info; // "String"
+  const { documents } = info; // {Object}
+  const files = JSON.parse(await fs.readFile(`./db/${message.guildId}/files.json`, "utf-8")); // {Object}
+  const plugins = await fs.readFile(`./db/${message.guildId}/plugins.json`, "utf-8"); // [Array]
   
   log.debug("Router started for message", message.id);
 
-  // Files
-  const files = JSON.parse(await fs.readFile(`./db/${message.guildId}/files.json`, "utf-8"));
-  const fileNames = Object.keys(files);
-  let developerFiles = fileNames.length ? "\n\n(FILES YOU HAVE ACCESS TO)\n" : "";
-  for (const fileName of fileNames) {
-    developerFiles += `${fileName}: ${files[fileName]}\n`;
-  }
 
-  // Chats
+  // Current User Message
   const attachmentNames = message?.attachments?.size 
   ? message.attachments.map(att => att.name)
   : [];
@@ -91,18 +87,32 @@ export async function router(info) {
       isAdministrator: true
     },
     content: message.content,
-    attachments: attachmentNames
+    attachments: attachmentNames,
+    documents: documents
   };
-  const userInput = `(PAST CHATS)\n${JSON.stringify(pastChats, null, 2)}\n(CURRENT USER MESSAGE)\n${JSON.stringify(currentUserMessage, null, 2)}`;
-  
-  // Plugins + versions + descriptions the model can reference quickly
-  let pluginRegistry = [];
-  try {
-    pluginRegistry = JSON.parse(await fs.readFile(`./db/${message.guildId}/plugins.json`, "utf-8"));
-  } catch {
-    pluginRegistry = [];
-  }
-  let developerPlugins = pluginRegistry.length ? `\n\n(MINECRAFT PLUGINS YOU HAVE ACCESS TO)\n${JSON.stringify(pluginRegistry, null, 2)}` : "";
+
+  // Inputs
+  const userInput = JSON.stringify({
+    pastChats: pastChats,
+    currentUserMessage: currentUserMessage
+  }, null, 2);
+  const devInput = JSON.stringify({
+    instructions: developerPrompt,
+    information: {
+      plugins: {
+        description: "Plugins you have access to.",
+        content: plugins
+      },
+      files: {
+        description: "Files you have access to.",
+        content: files
+      }
+    }
+  }, null, 2);
+  const assistantInput = JSON.stringify({
+    memorySummary: summary
+  }, null, 2);
+
 
   // Tools
   const tools = [
@@ -121,7 +131,7 @@ export async function router(info) {
             description: "Optional. An array of any files that need to be sent to the user.",
             items: { 
               type: "string",
-              enum: fileNames,
+              enum: Object.keys(files),
               description: "The name of the file you wish to send."
             },
           },
@@ -142,14 +152,14 @@ export async function router(info) {
 
   // Send initial route decision request to OpenAI
   log.debug("Sending routing request to gpt-5-nano");
-  log.response("OPENAI INPUT (ROUTER)", `|SYSTEM|\n${systemPrompt}\n|DEVELOPER|\n${developerPrompt + developerFiles + developerPlugins}\n|USER|\n${userInput}\n|ASSISTANT|\n(MEMORY SUMMARY)\n${summary}`);
+  log.response("OPENAI INPUT (ROUTER)", `|SYSTEM|\n${systemPrompt}\n|DEVELOPER|\n${devInput}\n|USER|\n${userInput}\n|ASSISTANT|\n${summary}`);
   const response = await client.responses.create({
     model: "gpt-5-nano",
     input: [
       { role: "system", content: systemPrompt },
-      { role: "developer", content: developerPrompt + developerFiles + developerPlugins },
+      { role: "developer", content: devInput },
       { role: "user", content: userInput },
-      { role: "assistant", content: `(MEMORY SUMMARY)\n${summary}` },
+      { role: "assistant", content: assistantInput },
     ],
     tools: tools
   });

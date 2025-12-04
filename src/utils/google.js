@@ -113,6 +113,7 @@ gdoc.read = async function(message) {
     if (res) {
       documents.push({
         title: res.data.title,
+        id: id,
         tabs: tabReader(res.data.tabs)
       });
     }

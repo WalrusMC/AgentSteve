@@ -173,13 +173,21 @@ client.on("messageCreate", async (message) => {
   info.pastChats = await getPastChats(message);
 
   // Documents
-  info.documents = message.content.includes("https://docs.google.com/document/d/") ? await gdoc.read(message) : false;
-  if (info.documents.data === "NO_AUTH") return;
+  info.documents = message.content.includes("https://docs.google.com/document/d/") ? await gdoc.read(message) : { success: false, data: "NO_DOCUMENTS" };
+  switch (info.documents.data) {
+    case "NO_AUTH":
+      return;
+    case "NO_ACCESS":
+      info.documents.data = "Document not found, due to broken link or incorrect permissions.";
+      break;
+    case "NO_DOCUMENT":
+      info.documents.data = "No documents.";
+  }
   if (info.documents.success) {
     if (info.documents.size > 20000) {
       // TO DO: Document summarizer (Feed sections of document to GPT nano)
-      if (info.documents.data.length > 1) return await message.reply("Those documents are too big for me to read! Try sending me one, smaller document.");
-      await message.reply("That document is too big for me to read! Try sending me a smaller one.");
+      if (info.documents.data.length > 1) return await message.reply("Those documents are too big for me to read! Try sending me a single, smaller document.");
+      await message.reply("That document is too big for me to read! Try sending me a smaller one. (< 15,000 characters)");
     } else if (info.documents.size > 5000) {
       // TO DO: Rate limit big documents
     }
@@ -201,6 +209,7 @@ client.on("messageCreate", async (message) => {
       break;
     default:
       sentMessages = await router(info);
+      break;
   }
 
   // Check if message was a clarification message and remove embeds
