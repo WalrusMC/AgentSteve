@@ -1,7 +1,6 @@
 import OpenAI from "openai";
 import fs from "fs/promises";
 import { sendMsgDiscord } from "./tools/sendMsgDiscord.js";
-import { getPastChats } from "./utils/getPastChats.js";
 import { coder } from "./specialistModels/coder.js"
 import { createLogger } from "./utils/logger.js";
 const client = new OpenAI;
@@ -59,14 +58,17 @@ BEHAVIOR RULES
  * Sends the user message and context to the selected model and executes any tool calls.
  * Falls back to Discord response on errors.
  */
-export async function moderate(message, summary, toolHistory = []) {
+export async function moderate(info, toolHistory = []) {
+  const { message } = info;
+  const { summary } = info;
+  const { pastChats } = info;
+
   log.info(`Moderate responder just started.`);
 
   // Tool History
   const assistantToolHistory = toolHistory?.length ? `\n\n(TOOL HISTORY)\n${JSON.stringify(toolHistory, null, 2)}` : "";
 
   // Chats
-  const pastChats = await getPastChats(message);
   const attachmentNames = message?.attachments?.size
     ? message.attachments.map(att => att.name)
     : [];
@@ -278,14 +280,14 @@ export async function moderate(message, summary, toolHistory = []) {
             status: "success",
             result: data.file
           });
-          return moderate(message, summary, toolHistory);
+          return moderate(info, toolHistory);
         } else {
           toolHistory.push({
             tool: toolCall.name,
             status: "fail",
             result: data.error
           });
-          return moderate(message, summary, toolHistory);
+          return moderate(info, toolHistory);
         }
       case "clarify":
         await sendMsgDiscord(args.question, message);

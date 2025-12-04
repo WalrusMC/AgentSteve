@@ -1,7 +1,6 @@
 import OpenAI from "openai";
 import fs from "fs/promises";
 import { sendMsgDiscord } from "./tools/sendMsgDiscord.js";
-import { getPastChats } from "./utils/getPastChats.js";
 import { createLogger } from "./utils/logger.js";
 import { moderate } from "./moderate.js";
 import { workflowOrchestrator } from "./complex/workflowOrchestrator.js";
@@ -65,7 +64,11 @@ You are part of a multi-model system. Do not mention your own capabilities or li
  * - Uses gpt-5-nano as a lightweight "reasoning controller" to either forward
  *   to a bigger model or answer directly when trivial.
  */
-export async function router(message, summary) {
+export async function router(info) {
+  const { message } = info;
+  const { pastChats } = info;
+  const { summary } = info;
+  
   log.debug("Router started for message", message.id);
 
   // Files
@@ -77,10 +80,9 @@ export async function router(message, summary) {
   }
 
   // Chats
-  const pastChats = await getPastChats(message);
-  const attachmentNames = message?.attachments?.size
-    ? message.attachments.map(att => att.name)
-    : [];
+  const attachmentNames = message?.attachments?.size 
+  ? message.attachments.map(att => att.name)
+  : [];
   const currentUserMessage = {
     time: message.createdAt.toISOString(),
     author: {
@@ -164,7 +166,7 @@ export async function router(message, summary) {
         return sendMsgDiscord(args.responseText, message, args.files);
       case "moderate":
         log.debug("The router evaluated the message as moderately complex");
-        return moderate(message, summary);
+        return moderate(info);
       case "complex":
         log.debug("The router evaluated the message as complex",);
         return sendMsgDiscord("This message is very complex, and I'm going to send it the Workflow Orchestrator.", message);
@@ -176,7 +178,7 @@ export async function router(message, summary) {
     switch (responseText) {
       case "moderate":
         log.warn("The router returned output text and evaluated the message as moderately complex");
-        return moderate(message, summary);
+        return moderate(info);
       case "complex":
         log.warn("The router returned output text and evaluated the message as complex",);
         return sendMsgDiscord("This message is very complex, and I'm going to send it the Workflow Orchestrator.", message);
