@@ -1,10 +1,7 @@
 import { google } from "googleapis";
 import fs from "fs/promises";
-import express from "express";
 
-const app = express();
-
-const KEY_FILE = JSON.parse(await fs.readFile("./google-key-file"));
+const KEY_FILE = JSON.parse(await fs.readFile("./google-key-file.json")).web;
 const CLIENT_SECRET = KEY_FILE.client_secret;
 const CLIENT_ID = KEY_FILE.client_id;
 const SCOPES = ["https://www.googleapis.com/auth/documents.readonly"];
@@ -12,23 +9,8 @@ const SCOPES = ["https://www.googleapis.com/auth/documents.readonly"];
 const oauth2Client = new google.auth.OAuth2(
   CLIENT_ID,
   CLIENT_SECRET,
-  "https://aiagents.walrusmc.com/oauth/google/callback"
+  "http://localhost:3000/oauth/google/callback"
 );
-
-// Saves tokens to the users.json db
-app.get("/oauth/google/callback", async (req, res) => {
-  const code = req.query.code;
-  const { tokens } = oauth2Client.getToken(code);
-  const state = JSON.parse(req.query.state);
-  const users = JSON.parse(await fs.readFile(`./db/${state.guild}/users.json`));
-
-  users[state.user].tokens = tokens;
-
-  await fs.writeFile(`./db/${state.guild}/users.json`, JSON.stringify(users, null, 2));
-
-  res.send("Authorization successful! You may return to Discord.");
-
-})
 
 export const gdoc = {};
 
@@ -55,7 +37,7 @@ gdoc.getTabs = function(tabs) {
     tabArray.push({
       title: obj.tabProperties.title,
       content: content,
-      subTabs: obj?.childTabs?.length ? tabReader(obj.childTabs) : []
+      subTabs: obj?.childTabs?.length ? gdoc.getTabs(obj.childTabs) : []
     })
 
   })
@@ -78,7 +60,7 @@ gdoc.read = async function(message) {
   };
 
   // Get latest authorization token
-  const token = await fs.readFile(JSON.parse(`./db/${message.guildId}/users.json`))?.[message.author.id]?.token;
+  const token = JSON.parse(await fs.readFile(`./db/${message.guildId}/users.json`))?.[message.author.id]?.token;
 
   // If no token, get a new token
   if (!token) {
@@ -86,24 +68,26 @@ gdoc.read = async function(message) {
       access_type: "offline",
       prompt: "consent",
       scope: SCOPES,
-      state: JSON.stringify({ user: message.author.id, guild: message.guildID })
+      state: `${message.author.id},${message.guildId}`
     });
-    message.reply(`I need permission to view that document. Click [this link](<${authUrl}>) to give me permission.`);
+    await message.reply(`I need permission to view that document. Click [this link](<${authUrl}>) to give me permission.`);
     return {
       success: false,
       data: "NO_AUTH"
     };
   }
 
+  oauth2Client.setCredentials(token);
+
   // Create docs client
   const docs = google.docs({ version: "v1", auth: oauth2Client });
 
   // Get each document by the ID
-  for(id of docIds) {
+  for (const id of docIds) {
     let res;
     try {
       res = await docs.documents.get({
-        documentId: DOC_ID,
+        documentId: id,
         includeTabsContent: true
       });
     } catch {
@@ -114,7 +98,8 @@ gdoc.read = async function(message) {
       documents.push({
         title: res.data.title,
         id: id,
-        tabs: tabReader(res.data.tabs)
+        link: `https://docs.google.com/document/d/${id}/`,
+        tabs: gdoc.getTabs(res.data.tabs || [])
       });
     }
   }
@@ -129,7 +114,7 @@ gdoc.read = async function(message) {
   return {
     success: true,
     data: documents,
-    size: JSON.stringify(documents).length
+    characterCount: JSON.stringify(documents).length
   };
 
 }
@@ -141,7 +126,6 @@ gdoc.extractIds = function(message) {
   if (!ids?.length) return [];
   ids.shift();
   ids.forEach(str => {
-    console.log(str);
     const spaceIndex = str.indexOf(" ") !== -1 ? str.indexOf(" ") : NaN;
     const slashIndex = str.indexOf("/") !== -1 ? str.indexOf("/") : NaN;
     if (spaceIndex || slashIndex) {

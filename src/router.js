@@ -87,8 +87,7 @@ export async function router(info) {
       isAdministrator: true
     },
     content: message.content,
-    attachments: attachmentNames,
-    documents: documents
+    attachments: attachmentNames
   };
 
   // Inputs
@@ -106,6 +105,10 @@ export async function router(info) {
       files: {
         description: "Files you have access to.",
         content: files
+      },
+      documents: {
+        description: "Any google documents referenced by the user's currentUserMessage.",
+        content: info.documents
       }
     }
   }, null, 2);

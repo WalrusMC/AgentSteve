@@ -173,28 +173,31 @@ client.on("messageCreate", async (message) => {
   info.pastChats = await getPastChats(message);
 
   // Documents
-  info.documents = message.content.includes("https://docs.google.com/document/d/") ? await gdoc.read(message) : { success: false, data: "NO_DOCUMENTS" };
-  switch (info.documents.data) {
+  const documents = message.content.includes("https://docs.google.com/document/d/") ? await gdoc.read(message) : { success: false, data: "NO_DOCUMENTS" };
+  switch (documents.data) {
     case "NO_AUTH":
+      currentlyRunning[guildKey] = false;
+      clearInterval(typingInterval);
       return;
     case "NO_ACCESS":
-      info.documents.data = "Document not found, due to broken link or incorrect permissions.";
+      documents.data = "Document not found, due to broken link or incorrect permissions.";
       break;
     case "NO_DOCUMENT":
-      info.documents.data = "No documents.";
+      documents.data = "No documents.";
   }
-  if (info.documents.success) {
-    if (info.documents.size > 20000) {
+  if (documents.success) {
+    if (documents.characterCount > 20000) {
       // TO DO: Document summarizer (Feed sections of document to GPT nano)
-      if (info.documents.data.length > 1) return await message.reply("Those documents are too big for me to read! Try sending me a single, smaller document.");
+      if (documents.data.length > 1) return await message.reply("Those documents are too big for me to read! Try sending me a single, smaller document.");
       await message.reply("That document is too big for me to read! Try sending me a smaller one. (< 15,000 characters)");
-    } else if (info.documents.size > 5000) {
+    } else if (documents.characterCount > 5000) {
       // TO DO: Rate limit big documents
     }
   } 
+  info.documents = documents.data;
 
   // Summaries
-  summaries = JSON.parse(await fs.readFile(`./db/${message.guildId}/summaries.json`, "utf8"));
+  const summaries = JSON.parse(await fs.readFile(`./db/${message.guildId}/summaries.json`, "utf8"));
   info.summary = summaries?.[message.channel.id] ? summaries[message.channel.id] : "NO PAST SUMMARIZATION FOUND!";
 
   // Forward to router, or skip the router if the last message was a clarification message.
