@@ -90,6 +90,7 @@ export async function moderate(info, toolHistory = []) {
     pastChats: pastChats,
     currentUserMessage: currentUserMessage
   }, null, 2);
+
   const devInput = JSON.stringify({
     instructions: developerPrompt,
     information: {
@@ -100,9 +101,14 @@ export async function moderate(info, toolHistory = []) {
       files: {
         description: "Files you have access to.",
         content: files
+      },
+      documents: {
+        description: "Google documents referenced by the user.",
+        content: info.documents
       }
     }
   }, null, 2);
+
   const assistantInput = JSON.stringify({
     memorySummary: summary,
     toolHistory: toolHistory
