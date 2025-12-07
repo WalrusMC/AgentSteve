@@ -47,10 +47,10 @@ export async function sendMsgDiscord(msgToSend, initiatingMsg, files = false) {
 
   for (const messageSection of messageSections) {
     log.debug(`Sending section (${messageSection.length} chars)`);
-    sentMessages.push(await initiatingMsg.channel.send(messageSection));
+    sentMessages.push(await initiatingMsg.reply(messageSection));
   }
 
-  if (files) sentMessages.push(await initiatingMsg.channel.send({ files: files }));
+  if (files) sentMessages.push(await initiatingMsg.reply({ files: files }));
 
   return sentMessages;
 }

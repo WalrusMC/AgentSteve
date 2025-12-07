@@ -8,6 +8,8 @@ import { createLogger } from "./utils/logger.js";
 import { isUserAllowed, allowUser, allowRole, disallowUser, disallowRole } from "./utils/whitelist.js";
 import { ensureDBs } from "./utils/ensureDBs.js";
 import { moderate } from "./moderate.js";
+import { getPastChats } from "./utils/getPastChats.js";
+import { gdoc } from "./utils/google.js";
 
 // Logger scoped to the Discord bot entrypoint
 const log = createLogger("index");
@@ -77,121 +79,159 @@ client.on("guildCreate", async guild => {
 // Login
 client.login(process.env.TOKEN);
 
-const clarifications = [];
-let currentlyRunning = {};
+const clarifications = {};
+const currentlyRunning = {};
 
 client.on("messageCreate", async (message) => {
+  // Exit function if:
+  // - The author is a bot
+  // - The author is pinging @everyone
+  // - The author is NOT pinging Steve
+  // - The author is NOT authorized
   if (message.author.bot) return;
   if (message.mentions.everyone) return;
   if (!message.mentions.has(client.user)) return;
-  if (currentlyRunning[`${message.guildId}`]) return message.channel.send("Slow down there! I can only answer one question at a time.");
   const allowed = await isUserAllowed(message.member, message.guildId);
-  if (allowed && message.mentions.has(client.user)) {
-    currentlyRunning[`${message.guildId}`] = true;
+  if (!allowed && !message.member.permissions.has(PermissionsBitField.Flags.Administrator)) return await message.reply({ content: ":warning: You don't have permission to talk to me right now. Server administrators can give users permission by doing /allow {user}.", ephemeral: true });
+  if (currentlyRunning[`${message.guildId}`]) return await message.reply("Slow down there! I can only answer one question at a time.");
 
-    log.debug("User pinged Steve and has correct permissions");
-  
-    // Make bot say typing while it generates a response
-    log.debug("Started typing");
-    message.channel.sendTyping();
-    const guildKey = `${message.guildId}`;
-    const typingInterval = setInterval(() => {
-      log.debug("Continuing typing indicator");
-      if (currentlyRunning[guildKey]) {
-        message.channel.sendTyping();
-      } else {
-        clearInterval(typingInterval);
-      }
-    }, 9000);
+  currentlyRunning[`${message.guildId}`] = true;
 
-    // If the user attached files, download and index them for tool access
-    try {
-      if (message.attachments?.size) {
-        log.info(`Found ${message.attachments.size} attachment(s); downloading...`);
-        const storedDir = path.join(process.cwd(), "src", "tools", "storedFiles", message.guildId);
-        try { await fs.mkdir(storedDir, { recursive: true }); } catch {}
+  const info = { message };
 
-        const filesIndexPath = path.join(process.cwd(), "db", message.guildId, "files.json");
-        let filesIndex = {};
-        try {
-          filesIndex = JSON.parse(await fs.readFile(filesIndexPath, "utf8"));
-        } catch {}
+  log.debug("User pinged Steve and has correct permissions");
 
-        const getUniqueName = async (dir, baseName) => {
-          const safe = baseName.replace(/[\\/]/g, "_");
-          let attempt = 0;
-          let candidate = safe;
-          const [name, ext] = (() => {
-            const idx = safe.lastIndexOf(".");
-            return idx > 0 ? [safe.slice(0, idx), safe.slice(idx)] : [safe, ""];
-          })();
-          while (true) {
-            try {
-              await fs.access(path.join(dir, candidate));
-              attempt += 1;
-              candidate = `${name}-${attempt}${ext}`;
-            } catch {
-              return candidate;
-            }
-          }
-        };
+  // Make bot say typing while it generates a response
+  log.debug("Started typing");
+  message.channel.sendTyping();
+  const typingInterval = setInterval(() => {
+    log.debug("Continuing typing indicator");
+    if (currentlyRunning[message.guildId]) {
+      message.channel.sendTyping();
+    } else {
+      clearInterval(typingInterval);
+    }
+  }, 9000);
 
-        for (const att of message.attachments.values()) {
+  // If the user attached files, download and index them for tool access
+  try {
+    if (message.attachments?.size) {
+      log.info(`Found ${message.attachments.size} attachment(s); downloading...`);
+      const storedDir = path.join(process.cwd(), "src", "tools", "storedFiles", message.guildId);
+      try { await fs.mkdir(storedDir, { recursive: true }); } catch {}
+
+      const filesIndexPath = path.join(process.cwd(), "db", message.guildId, "files.json");
+      let filesIndex = {};
+      try {
+        filesIndex = JSON.parse(await fs.readFile(filesIndexPath, "utf8"));
+      } catch {}
+
+      const getUniqueName = async (dir, baseName) => {
+        const safe = baseName.replace(/[\\/]/g, "_");
+        let attempt = 0;
+        let candidate = safe;
+        const [name, ext] = (() => {
+          const idx = safe.lastIndexOf(".");
+          return idx > 0 ? [safe.slice(0, idx), safe.slice(idx)] : [safe, ""];
+        })();
+        while (true) {
           try {
-            const res = await fetch(att.url);
-            if (!res.ok) throw new Error(`Failed to download: ${att.url} (${res.status})`);
-            const arrayBuffer = await res.arrayBuffer();
-            const buffer = Buffer.from(arrayBuffer);
-            const fileName = await getUniqueName(storedDir, att.name || "upload");
-            await fs.writeFile(path.join(storedDir, fileName), buffer);
-            filesIndex[fileName] = `User-uploaded file from @${message.author.username} (${message.author.id}) at ${new Date().toISOString()}`;
-            log.info(`Saved attachment as ${fileName}`);
-          } catch (err) {
-            log.error("Failed to save attachment:", err?.message || err);
+            await fs.access(path.join(dir, candidate));
+            attempt += 1;
+            candidate = `${name}-${attempt}${ext}`;
+          } catch {
+            return candidate;
           }
         }
-        await fs.writeFile(filesIndexPath, JSON.stringify(filesIndex, null, 2));
+      };
+
+      for (const att of message.attachments.values()) {
+        try {
+          const res = await fetch(att.url);
+          if (!res.ok) throw new Error(`Failed to download: ${att.url} (${res.status})`);
+          const arrayBuffer = await res.arrayBuffer();
+          const buffer = Buffer.from(arrayBuffer);
+          const fileName = await getUniqueName(storedDir, att.name || "upload");
+          await fs.writeFile(path.join(storedDir, fileName), buffer);
+          filesIndex[fileName] = `User-uploaded file from @${message.author.username} (${message.author.id}) at ${new Date().toISOString()}`;
+          log.info(`Saved attachment as ${fileName}`);
+        } catch (err) {
+          log.error("Failed to save attachment:", err?.message || err);
+        }
       }
-    } catch (err) {
-      log.error("Attachment handling failed:", err?.message || err);
+      await fs.writeFile(filesIndexPath, JSON.stringify(filesIndex, null, 2));
     }
-
-    // Summarize
-    summarizer(message);
-
-    // Respond to user request
-    let sentMessages;
-    const summaries = JSON.parse(await fs.readFile(`./db/${message.guildId}/summaries.json`, "utf8"));
-
-    const clarification = clarifications?.find( obj => obj.guildId === message.guildId) ? clarifications.find( obj => obj.guildId === message.guildId) : false;
-    if (clarification?.type === "moderate") {
-      sentMessages = await moderate(message, summaries[message.channel.id]);
-      clarifications.splice(indexOf(clarification), 1);
-    } else if (clarification?.type === "complex") {
-      sentMessages = [await message.channel.send("Placeholder")];
-      clarifications.splice(indexOf(clarification), 1);
-    } else {
-      sentMessages = await router(message, summaries[message.channel.id] ? summaries[message.channel.id] : "NO PAST SUMMARIZATION FOUND!");
-    }
-
-    if (sentMessages.clarify) {
-      // Check if the message is a clarification message
-      clarifications.push({ type: sentMessages.type, guildId: message.guildId});
-    } else {
-      // Remove embeds
-      for (const sentMessage of sentMessages) {
-        log.debug("Suppressing embeds for sent message");
-        sentMessage.suppressEmbeds(true);
-      }
-    }
-    // Stop typing
-    log.debug("Cleared typing interval");
-    clearInterval(typingInterval);
-
-    currentlyRunning[`${message.guildId}`] = false;
-
+  } catch (err) {
+    log.error("Attachment handling failed:", err?.message || err);
   }
-})
+
+  // Summarize
+  summarizer(message);
+
+  // Past chats
+  info.pastChats = await getPastChats(message);
+
+  // Documents
+  const documents = message.content.includes("https://docs.google.com/document/d/") ? await gdoc.read(message.content, message) : { success: false, data: "NO_DOCS" };
+  switch (documents.data) {
+    case "FORBIDDEN":
+    case "NO_AUTH":
+      currentlyRunning[message.guildId] = false;
+      clearInterval(typingInterval);
+      return;
+    case "NOT_FOUND":
+      documents.data = "Document not found due to broken or fake link.";
+      break;
+    case "NO_DOCS":
+      documents.data = "No documents.";
+  }
+  if (documents.success) {
+    if (documents.size > 20000) {
+      // TO DO: Document summarizer (Feed sections of document to GPT nano)
+      if (documents.data.length > 1) return await message.reply("Those documents are too big for me to read! Try sending me a single, smaller document.");
+      await message.reply("That document is too big for me to read! Try sending me a smaller one. (< 15,000 characters)");
+    } else if (documents.size > 5000) {
+      // TO DO: Rate limit big documents
+    }
+  } 
+  info.documents = documents.data;
+
+  // Summaries
+  const summaries = JSON.parse(await fs.readFile(`./db/${message.guildId}/summaries.json`, "utf8"));
+  info.summary = summaries?.[message.channel.id] ? summaries[message.channel.id] : "NO PAST SUMMARIZATION FOUND!";
+
+  // Forward to router, or skip the router if the last message was a clarification message.
+  let sentMessages;
+  switch (clarifications?.[message.guildId]) {
+    case "moderate":
+      sentMessages = await moderate(info);
+      break;
+    case "complex":
+      // TO DO: Create complex responder (workflow orchestrator, etc)
+      sentMessages = await message.reply("Placeholder");
+      break;
+    default:
+      sentMessages = await router(info);
+      break;
+  }
+
+  // Check if message was a clarification message and remove embeds
+  if (sentMessages?.clarify) {
+    clarifications[message.guildId] = sentMessages.type;
+  } else if (sentMessages) {
+    for (const sentMessage of sentMessages) {
+      log.debug("Suppressing embeds for sent message");
+      sentMessage.suppressEmbeds(true);
+    }
+  }
+
+  // Stop typing
+  log.debug("Cleared typing interval");
+  clearInterval(typingInterval);
+
+  currentlyRunning[`${message.guildId}`] = false;
+
+});
 
 // Slash command handler for allow/disallow
 client.on("interactionCreate", async (interaction) => {
