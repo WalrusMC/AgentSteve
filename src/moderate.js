@@ -3,6 +3,7 @@ import fs from "fs/promises";
 import { sendMsgDiscord } from "./tools/sendMsgDiscord.js";
 import { coder } from "./specialistModels/coder.js"
 import { createLogger } from "./utils/logger.js";
+import { gdoc } from "./utils/google.js";
 const client = new OpenAI;
 const log = createLogger("moderate");
 
@@ -64,7 +65,7 @@ export async function moderate(info, toolHistory = []) {
   const { summary } = info; // "String"
   const { documents } = info; // {Object}
   const files = JSON.parse(await fs.readFile(`./db/${message.guildId}/files.json`, "utf-8")); // {Object}
-  const plugins = await fs.readFile(`./db/${message.guildId}/plugins.json`, "utf-8"); // [Array]
+  const plugins = JSON.parse(await fs.readFile(`./db/${message.guildId}/plugins.json`, "utf-8")); // [Array]
   
   log.debug("Router started for message", message.id);
 
@@ -103,8 +104,8 @@ export async function moderate(info, toolHistory = []) {
         content: files
       },
       documents: {
-        description: "Google documents referenced by the user.",
-        content: info.documents
+        description: "Google documents referenced by the user. Call the readDoc() tool if you need to access a document that is not listed here.",
+        content: documents
       }
     }
   }, null, 2);
@@ -258,6 +259,26 @@ export async function moderate(info, toolHistory = []) {
       },
       required: ["question"],
     },
+    {
+      type: "function",
+      name: "readDoc",
+      description: "Retrieve a Google document's content by its ID.",
+      parameters: {
+        type: "object",
+        properties: {
+          ids: {
+            type: "array",
+            description: "An array of document IDs to retrieve. Only call this tool if you know the document ID.",
+            items: {
+              type: "string",
+              enum: gdoc.extractIds(JSON.stringify(pastChats) + summary),
+              description: "The specific document ID to retrieve."
+            }
+          }
+        },
+        required: ["ids"],
+      }
+    }
   ];
 
   // Send request to OpenAI API
@@ -308,6 +329,44 @@ export async function moderate(info, toolHistory = []) {
           clarify: true,
           type: "moderate"
         };
+      case "readDoc":
+        // TO DO: Add summarizer for really big documents.
+        data = await gdoc.read(false, message, args.ids);
+        switch (data.data) {
+          case "NO_AUTH":
+          case "FORBIDDEN":
+            return false;
+          case "NOT_FOUND":
+            toolHistory.push({
+              tool: toolCall.name,
+              status: "fail",
+              result: `None of the requested documents exist. Requested documents: ${JSON.stringify(args.ids)}`
+            });
+            return await moderate(info, toolHistory);
+          default:
+            if (data.success) {
+              if (data.size > 20000) {
+                toolHistory.push({
+                  tool: toolCall.name,
+                  status: "fail",
+                  result: `The requested documents were too big to retrieve. Documents should be less than 15,000 characters. Requested documents: ${JSON.stringify(args.ids)}`
+                });
+                return await moderate(info, toolHistory);
+              } else {
+                info.documents = [info.documents];
+                info.documents.push(... data.data);
+                toolHistory.push({
+                  tool: toolCall.name,
+                  status: "success",
+                  result: `The requested documents have been added to the developer information. Requested documents: ${JSON.stringify(args.ids)}`
+                })
+                return await moderate(info, toolHistory);
+              }
+            } else {
+              log.error("gdoc.read() returned invalid data.");
+              return await sendMsgDiscord("Oh no! An error has occured.", message);
+            }
+        }
       default:
         log.error("GPT did not call a valid tool.");
         return await sendMsgDiscord("Oh no! An error has occured.", message);

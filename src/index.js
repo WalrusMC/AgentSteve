@@ -104,10 +104,9 @@ client.on("messageCreate", async (message) => {
   // Make bot say typing while it generates a response
   log.debug("Started typing");
   message.channel.sendTyping();
-  const guildKey = `${message.guildId}`;
   const typingInterval = setInterval(() => {
     log.debug("Continuing typing indicator");
-    if (currentlyRunning[guildKey]) {
+    if (currentlyRunning[message.guildId]) {
       message.channel.sendTyping();
     } else {
       clearInterval(typingInterval);
@@ -173,24 +172,25 @@ client.on("messageCreate", async (message) => {
   info.pastChats = await getPastChats(message);
 
   // Documents
-  const documents = message.content.includes("https://docs.google.com/document/d/") ? await gdoc.read(message) : { success: false, data: "NO_DOCUMENTS" };
+  const documents = message.content.includes("https://docs.google.com/document/d/") ? await gdoc.read(message.content, message) : { success: false, data: "NO_DOCS" };
   switch (documents.data) {
+    case "FORBIDDEN":
     case "NO_AUTH":
-      currentlyRunning[guildKey] = false;
+      currentlyRunning[message.guildId] = false;
       clearInterval(typingInterval);
       return;
-    case "NO_ACCESS":
-      documents.data = "Document not found, due to broken link or incorrect permissions.";
+    case "NOT_FOUND":
+      documents.data = "Document not found due to broken or fake link.";
       break;
-    case "NO_DOCUMENT":
+    case "NO_DOCS":
       documents.data = "No documents.";
   }
   if (documents.success) {
-    if (documents.characterCount > 20000) {
+    if (documents.size > 20000) {
       // TO DO: Document summarizer (Feed sections of document to GPT nano)
       if (documents.data.length > 1) return await message.reply("Those documents are too big for me to read! Try sending me a single, smaller document.");
       await message.reply("That document is too big for me to read! Try sending me a smaller one. (< 15,000 characters)");
-    } else if (documents.characterCount > 5000) {
+    } else if (documents.size > 5000) {
       // TO DO: Rate limit big documents
     }
   } 
@@ -218,7 +218,7 @@ client.on("messageCreate", async (message) => {
   // Check if message was a clarification message and remove embeds
   if (sentMessages?.clarify) {
     clarifications[message.guildId] = sentMessages.type;
-  } else {
+  } else if (sentMessages) {
     for (const sentMessage of sentMessages) {
       log.debug("Suppressing embeds for sent message");
       sentMessage.suppressEmbeds(true);
