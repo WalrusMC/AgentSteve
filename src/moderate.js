@@ -1,9 +1,9 @@
 import OpenAI from "openai";
 import fs from "fs/promises";
 import { sendMsgDiscord } from "./tools/sendMsgDiscord.js";
-import { getPastChats } from "./utils/getPastChats.js";
 import { coder } from "./specialistModels/coder.js"
 import { createLogger } from "./utils/logger.js";
+import { gdoc } from "./utils/google.js";
 const client = new OpenAI;
 const log = createLogger("moderate");
 
@@ -18,7 +18,7 @@ You live on Discord and help users with:
 - Troubleshooting
 
 Rules:
-- Always answer the user’s CURRENT MESSAGE, not assumptions or past intents.
+- Always answer the user’s currentUserMessage, not assumptions or past intents.
 - Keep answers clear and actionable.
 - Be concise by default (1–4 short paragraphs). Expand only if the user asks.
 - If the user asks to create or edit a plugin, you must use tools — not free-text.
@@ -27,50 +27,53 @@ Rules:
 `;
 
 const developerPrompt = `
-Your job is to analyze the CURRENT USER MESSAGE, decide what needs to be done,
+Your job is to analyze the currentUserMessage, decide what needs to be done,
 call tools (if necessary), and then respond to the user via the **respond** tool.
 
 =======================
 TOOL USAGE LOGIC
 =======================
 
-Determine whether tools are required to fulfill the CURRENT USER MESSAGE.
+Determine whether tools are required to fulfill the currentUserMessage.
 
 If tools are NOT needed:
 Call the respond tool with the final textual response.
 
 If tools ARE needed:
-Read the TOOL HISTORY to understand which tools have already been executed.
-- If a required tool call already appears in TOOL HISTORY with "status: success", DO NOT call that tool again.
+Read your assistant toolHistory to understand which tools have already been executed.
+- If a required tool call already appears in toolHistory with "status: success", DO NOT call that tool again.
 - If an additional tool call is still required, call exactly ONE tool and wait for its result.
 - If no more tool calls are required, call respond().
 
 =======================
 BEHAVIOR RULES
 =======================
-- Never call a tool that already succeeded in TOOL HISTORY.
+- Never call a tool that already succeeded in toolHistory.
 - When all tool work is finished, immediately call respond().
 - When uncertain of user intent, request clarification with clarify().
 - You may use Discord formatting (bold, italics, inline code, code blocks, emoji)
   inside respond() to improve readability.
-
 `;
 
 /**
  * Sends the user message and context to the selected model and executes any tool calls.
  * Falls back to Discord response on errors.
  */
-export async function moderate(message, summary, toolHistory = []) {
-  log.info(`Moderate responder just started.`);
+export async function moderate(info, toolHistory = []) {
+  const { message } = info; // {Object}
+  const { pastChats } = info; // [Array]
+  const { summary } = info; // "String"
+  const { documents } = info; // {Object}
+  const files = JSON.parse(await fs.readFile(`./db/${message.guildId}/files.json`, "utf-8")); // {Object}
+  const plugins = JSON.parse(await fs.readFile(`./db/${message.guildId}/plugins.json`, "utf-8")); // [Array]
+  
+  log.debug("Router started for message", message.id);
 
-  // Tool History
-  const assistantToolHistory = toolHistory?.length ? `\n\n(TOOL HISTORY)\n${JSON.stringify(toolHistory, null, 2)}` : "";
 
-  // Chats
-  const pastChats = await getPastChats(message);
-  const attachmentNames = message?.attachments?.size
-    ? Array.from(message.attachments.values()).map(a => a.name)
-    : [];
+  // Current User Message
+  const attachmentNames = message?.attachments?.size 
+  ? message.attachments.map(att => att.name)
+  : [];
   const currentUserMessage = {
     time: message.createdAt.toISOString(),
     author: {
@@ -79,26 +82,38 @@ export async function moderate(message, summary, toolHistory = []) {
       isAdministrator: true
     },
     content: message.content,
-    attachments: attachmentNames ? attachmentNames : []
+    attachments: attachmentNames,
+    documents: documents
   };
-  const userInput = `(PAST CHATS)\n${JSON.stringify(pastChats, null, 2)}\n(CURRENT USER MESSAGE)\n${JSON.stringify(currentUserMessage, null, 2)}`;
 
-  // Files
-  const files = JSON.parse(await fs.readFile(`./db/${message.guildId}/files.json`, "utf-8"));
-  const fileNames = Object.keys(files);
-  let developerFiles = fileNames.length ? "\n\n(FILES YOU HAVE ACCESS TO)\n" : "";
-  for (const fileName of fileNames) {
-    developerFiles += `${fileName}: ${files[fileName]}\n`;
-  }
+  // Inputs
+  const userInput = JSON.stringify({
+    pastChats: pastChats,
+    currentUserMessage: currentUserMessage
+  }, null, 2);
 
-  // Plugins + versions + descriptions the model can reference quickly
-  let pluginRegistry = [];
-  try {
-    pluginRegistry = JSON.parse(await fs.readFile(`./db/${message.guildId}/plugins.json`, "utf-8"));
-  } catch {
-    pluginRegistry = [];
-  }
-  let developerPlugins = pluginRegistry.length ? `\n\n(MINECRAFT PLUGINS YOU HAVE ACCESS TO)\n${JSON.stringify(pluginRegistry, null, 2)}` : "";
+  const devInput = JSON.stringify({
+    instructions: developerPrompt,
+    information: {
+      plugins: {
+        description: "Plugins you have access to.",
+        content: plugins
+      },
+      files: {
+        description: "Files you have access to.",
+        content: files
+      },
+      documents: {
+        description: "Google documents referenced by the user. Call the readDoc() tool if you need to access a document that is not listed here.",
+        content: documents
+      }
+    }
+  }, null, 2);
+
+  const assistantInput = JSON.stringify({
+    memorySummary: summary,
+    toolHistory: toolHistory
+  }, null, 2);
 
   // Tools
   const tools = [
@@ -118,7 +133,7 @@ export async function moderate(message, summary, toolHistory = []) {
             description: "Optional. An array of any files that need to be sent to the user.",
             items: { 
               type: "string",
-              enum: fileNames,
+              enum: Object.keys(files),
               description: "The name of the file you wish to send."
             },
           },
@@ -186,8 +201,8 @@ export async function moderate(message, summary, toolHistory = []) {
         properties: {
           pluginName: {
             type: "string",
-            description: "The name of the plugin. MUST be a valid Java class name.",
-            enum: pluginRegistry.map(obj => obj.name),
+            description: "The name of the plugin.",
+            enum: plugins.map(obj => obj.name),
           },
           assistantMessage: {
             type: "object",
@@ -244,17 +259,37 @@ export async function moderate(message, summary, toolHistory = []) {
       },
       required: ["question"],
     },
+    {
+      type: "function",
+      name: "readDoc",
+      description: "Retrieve a Google document's content by its ID.",
+      parameters: {
+        type: "object",
+        properties: {
+          ids: {
+            type: "array",
+            description: "An array of document IDs to retrieve. Only call this tool if you know the document ID.",
+            items: {
+              type: "string",
+              enum: gdoc.extractIds(JSON.stringify(pastChats) + summary),
+              description: "The specific document ID to retrieve."
+            }
+          }
+        },
+        required: ["ids"],
+      }
+    }
   ];
 
   // Send request to OpenAI API
-  log.response("OPENAI INPUT (MODERATE)", `|SYSTEM|\n${systemPrompt}\n|DEVELOPER|\n${developerPrompt + developerFiles + developerPlugins}\n|USER|\n${userInput}\n|ASSISTANT|\n(MEMORY SUMMARY)\n${summary}${assistantToolHistory}`);
+  log.response("OPENAI INPUT (MODERATE)", `|SYSTEM|\n${systemPrompt}\n|DEVELOPER|\n${devInput}\n|USER|\n${userInput}\n|ASSISTANT|\n${assistantInput}`);
   const response = await client.responses.create({
     model: "gpt-5-mini",
     input: [
       { role: "system", content: systemPrompt },
-      { role: "developer", content: developerPrompt + developerFiles + developerPlugins },
+      { role: "developer", content: devInput },
       { role: "user", content: userInput },
-      { role: "assistant", content: `(MEMORY SUMMARY)\n${summary}${assistantToolHistory}` },
+      { role: "assistant", content: assistantInput },
     ],
     tools: tools
   });
@@ -279,20 +314,59 @@ export async function moderate(message, summary, toolHistory = []) {
             status: "success",
             result: data.file
           });
-          return moderate(message, summary, toolHistory);
+          return moderate(info, toolHistory);
         } else {
           toolHistory.push({
             tool: toolCall.name,
             status: "fail",
             result: data.error
           });
-          return moderate(message, summary, toolHistory);
+          return moderate(info, toolHistory);
         }
       case "clarify":
-        data = await sendMsgDiscord(args.question);
+        await sendMsgDiscord(args.question, message);
         return {
-          clarify: true
+          clarify: true,
+          type: "moderate"
         };
+      case "readDoc":
+        // TO DO: Add summarizer for really big documents.
+        data = await gdoc.read(false, message, args.ids);
+        switch (data.data) {
+          case "NO_AUTH":
+          case "FORBIDDEN":
+            return false;
+          case "NOT_FOUND":
+            toolHistory.push({
+              tool: toolCall.name,
+              status: "fail",
+              result: `None of the requested documents exist. Requested documents: ${JSON.stringify(args.ids)}`
+            });
+            return await moderate(info, toolHistory);
+          default:
+            if (data.success) {
+              if (data.size > 20000) {
+                toolHistory.push({
+                  tool: toolCall.name,
+                  status: "fail",
+                  result: `The requested documents were too big to retrieve. Documents should be less than 15,000 characters. Requested documents: ${JSON.stringify(args.ids)}`
+                });
+                return await moderate(info, toolHistory);
+              } else {
+                info.documents = [info.documents];
+                info.documents.push(... data.data);
+                toolHistory.push({
+                  tool: toolCall.name,
+                  status: "success",
+                  result: `The requested documents have been added to the developer information. Requested documents: ${JSON.stringify(args.ids)}`
+                })
+                return await moderate(info, toolHistory);
+              }
+            } else {
+              log.error("gdoc.read() returned invalid data.");
+              return await sendMsgDiscord("Oh no! An error has occured.", message);
+            }
+        }
       default:
         log.error("GPT did not call a valid tool.");
         return await sendMsgDiscord("Oh no! An error has occured.", message);
