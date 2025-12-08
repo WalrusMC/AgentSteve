@@ -9,7 +9,7 @@ import { isUserAllowed, allowUser, allowRole, disallowUser, disallowRole } from 
 import { ensureDBs } from "./utils/ensureDBs.js";
 import { moderate } from "./moderate.js";
 import { getPastChats } from "./utils/getPastChats.js";
-import { gdoc } from "./utils/google.js";
+import { gdoc } from "./tools/google.js";
 
 // Logger scoped to the Discord bot entrypoint
 const log = createLogger("index");

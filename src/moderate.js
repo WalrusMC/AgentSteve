@@ -3,7 +3,7 @@ import fs from "fs/promises";
 import { sendMsgDiscord } from "./tools/sendMsgDiscord.js";
 import { coder } from "./specialistModels/coder.js"
 import { createLogger } from "./utils/logger.js";
-import { gdoc } from "./utils/google.js";
+import { gdoc } from "./tools/google.js";
 const client = new OpenAI;
 const log = createLogger("moderate");
 

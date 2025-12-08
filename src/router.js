@@ -99,7 +99,6 @@ export async function router(info) {
   const { message } = info; // {Object}
   const { pastChats } = info; // [Array]
   const { summary } = info; // "String"
-  const { documents } = info; // {Object}
   const files = JSON.parse(await fs.readFile(`./db/${message.guildId}/files.json`, "utf-8")); // {Object}
   const plugins = await fs.readFile(`./db/${message.guildId}/plugins.json`, "utf-8"); // [Array]
   
