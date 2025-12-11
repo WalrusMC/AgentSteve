@@ -7,7 +7,7 @@ import path from "path";
  */
 export async function ensureDBs(guildId) {
   const guildDbDir = path.join("db", guildId);
-  const storedFilesDir = path.join("src", "tools", "storedFiles", guildId);
+  const downloadsDir = path.join("src", "tools", "downloads", guildId);
 
   const ensureDir = async (dir) => {
     await fs.mkdir(dir, { recursive: true });
@@ -22,7 +22,7 @@ export async function ensureDBs(guildId) {
   };
 
   await ensureDir(guildDbDir);
-  await ensureDir(storedFilesDir);
+  await ensureDir(downloadsDir);
 
   await ensureFile(path.join(guildDbDir, "files.json"), "{}");
   await ensureFile(path.join(guildDbDir, "summaries.json"), "{}");

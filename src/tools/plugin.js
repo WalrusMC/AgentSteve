@@ -96,10 +96,10 @@ async function buildJAR(pluginName, pluginVersion, pluginJava, pluginYML, config
 
 // Generate temp build directory structure and build the jar
   const builderRoot = path.join(__dirname, "pluginBuilder", guildId);
-  const javaDir = path.join(builderRoot, "src", "main", "java", "com", "agentsteveofficial");
+  const javaDir = path.join(builderRoot, "src", "main", "java", "com", "walrusmc");
   const resourcesDir = path.join(builderRoot, "src", "main", "resources");
   const pomPath = path.join(builderRoot, "pom.xml");
-  const storedGuildDir = path.join(__dirname, "storedFiles", guildId);
+  const storedGuildDir = path.join(__dirname, "downloads", guildId);
   const jarOutputName = `${pluginName}-${pluginVersion}.jar`;
 
   try {
@@ -171,7 +171,7 @@ plugin.createNew = async function(pluginName, pluginDescription, pluginJava, plu
 
       <modelVersion>4.0.0</modelVersion>
 
-      <groupId>com.agentsteveofficial</groupId>
+      <groupId>com.walrusmc</groupId>
 
       <artifactId>${pluginName}</artifactId>
 
@@ -231,7 +231,7 @@ plugin.createNew = async function(pluginName, pluginDescription, pluginJava, plu
   `
 
   // Write files to GitHub
-  await writeFile(pluginName, `src/main/java/com/agentsteveofficial/${pluginName}.java`, pluginJava, "Initial commit", guildId);
+  await writeFile(pluginName, `src/main/java/com/walrusmc/${pluginName}.java`, pluginJava, "Initial commit", guildId);
   await writeFile(pluginName, `src/main/resources/plugin.yml`, pluginYML, "Initial commit", guildId);
   await writeFile(pluginName, `src/main/resources/config.yml`, configYML, "Initial commit", guildId);
   await writeFile(pluginName, `pom.xml`, pomXML, "Initial commit", guildId);
@@ -285,7 +285,7 @@ plugin.edit = async function(pluginName, pluginDescription, deletions = [], inse
   const currentVersion = existingPlugin?.version || "1.0.0";
   const pluginVersion = bumpPatchVersion(currentVersion);
 
-  let pluginJava = await getFile(pluginName, `src/main/java/com/agentsteveofficial/${pluginName}.java`, guildId);
+  let pluginJava = await getFile(pluginName, `src/main/java/com/walrusmc/${pluginName}.java`, guildId);
   let pluginYML = await getFile(pluginName, `src/main/resources/plugin.yml`, guildId);
   let configYML = await getFile(pluginName, `src/main/resources/config.yml`, guildId);
 
@@ -302,7 +302,7 @@ plugin.edit = async function(pluginName, pluginDescription, deletions = [], inse
   if (updatedPluginJava !== pluginJava) {
     log.info(`Applying changes to ${pluginName}.java`);
     pluginJava = updatedPluginJava;
-    await writeFile(pluginName, `src/main/java/com/agentsteveofficial/${pluginName}.java`, pluginJava, `Update ${pluginName}.java to ${pluginVersion}`, guildId);
+    await writeFile(pluginName, `src/main/java/com/walrusmc/${pluginName}.java`, pluginJava, `Update ${pluginName}.java to ${pluginVersion}`, guildId);
   }
 
   const updatedPluginYML = applyTextChanges(pluginYML, "pluginYML", sanitizedDeletions, sanitizedInsertions);
@@ -346,7 +346,7 @@ plugin.edit = async function(pluginName, pluginDescription, deletions = [], inse
 
     <modelVersion>4.0.0</modelVersion>
 
-    <groupId>com.agentsteveofficial</groupId>
+    <groupId>com.walrusmc</groupId>
 
     <artifactId>${pluginName}</artifactId>
 
@@ -434,7 +434,7 @@ plugin.retrieveCode = async function(pluginName, files, guildId) {
 
   pluginInfo = JSON.parse(await fs.readFile(`./db/${guildId}/plugins.json`, "utf8")).find(obj => obj.name === pluginName);
   pluginDescription = pluginInfo.description;
-  code.pluginJava = files.includes("pluginJava") ? await getFile(pluginName, `src/main/java/com/agentsteveofficial/${pluginName}.java`, guildId) : false;
+  code.pluginJava = files.includes("pluginJava") ? await getFile(pluginName, `src/main/java/com/walrusmc/${pluginName}.java`, guildId) : false;
   code.pluginYML = files.includes("pluginYML") ? await getFile(pluginName, `src/main/resources/plugin.yml`, guildId) : false;
   code.configYML = files.includes("configYML") ? await getFile(pluginName, "src/main/resources/config.yml", guildId) : false;
   let dependencies = [];

@@ -1,13 +1,13 @@
 import "dotenv/config";
 import { Client, GatewayIntentBits, PermissionsBitField, MessageFlags } from "discord.js";
 import { router } from "./router.js";
-import { summarizer } from "./summarizer.js";
+import { summarizer } from "./models/summarizer.js";
 import fs from "fs/promises";
 import path from "path";
 import { createLogger } from "./utils/logger.js";
 import { isUserAllowed, allowUser, allowRole, disallowUser, disallowRole } from "./utils/whitelist.js";
 import { ensureDBs } from "./utils/ensureDBs.js";
-import { moderate } from "./moderate.js";
+import { moderate } from "./models/moderate.js";
 import { getPastChats } from "./utils/getPastChats.js";
 import { gdoc } from "./tools/google.js";
 
@@ -77,7 +77,7 @@ client.on("guildCreate", async guild => {
 });
 
 // Login
-client.login(process.env.TOKEN);
+client.login(process.env.DISCORD_TOKEN);
 
 const clarifications = {};
 const currentlyRunning = {};
@@ -117,13 +117,13 @@ client.on("messageCreate", async (message) => {
   try {
     if (message.attachments?.size) {
       log.info(`Found ${message.attachments.size} attachment(s); downloading...`);
-      const storedDir = path.join(process.cwd(), "src", "tools", "storedFiles", message.guildId);
+      const storedDir = path.join(process.cwd(), "src", "tools", "downloads", message.guildId);
       try { await fs.mkdir(storedDir, { recursive: true }); } catch {}
 
-      const filesIndexPath = path.join(process.cwd(), "db", message.guildId, "files.json");
-      let filesIndex = {};
+      const downloadsIndexPath = path.join(process.cwd(), "db", message.guildId, "downloads.json");
+      let downloadsIndex = {};
       try {
-        filesIndex = JSON.parse(await fs.readFile(filesIndexPath, "utf8"));
+        downloadsIndex = JSON.parse(await fs.readFile(downloadsIndexPath, "utf8"));
       } catch {}
 
       const getUniqueName = async (dir, baseName) => {
@@ -153,23 +153,23 @@ client.on("messageCreate", async (message) => {
           const buffer = Buffer.from(arrayBuffer);
           const fileName = await getUniqueName(storedDir, att.name || "upload");
           await fs.writeFile(path.join(storedDir, fileName), buffer);
-          filesIndex[fileName] = `User-uploaded file from @${message.author.username} (${message.author.id}) at ${new Date().toISOString()}`;
+          downloadsIndex[fileName] = `User-uploaded file from @${message.author.username} (${message.author.id}) at ${new Date().toISOString()}`;
           log.info(`Saved attachment as ${fileName}`);
         } catch (err) {
           log.error("Failed to save attachment:", err?.message || err);
         }
       }
-      await fs.writeFile(filesIndexPath, JSON.stringify(filesIndex, null, 2));
+      await fs.writeFile(downloadsIndexPath, JSON.stringify(downloadsIndex, null, 2));
     }
   } catch (err) {
     log.error("Attachment handling failed:", err?.message || err);
   }
 
   // Summarize
-  summarizer(message);
+  //summarizer(message); // UNDER DEVELOPMENT
 
   // Past chats
-  info.pastChats = await getPastChats(message);
+  info.pastChats = await getPastChats(message, 2000);
 
   // Documents
   const documents = message.content.includes("https://docs.google.com/document/d/") ? await gdoc.read(message.content, message) : { success: false, data: "NO_DOCS" };

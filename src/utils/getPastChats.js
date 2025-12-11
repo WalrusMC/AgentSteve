@@ -6,8 +6,8 @@ import { isUserAllowed } from "./whitelist.js";
  * Labels senders as ADMINISTRATOR if they are whitelisted (aligned with prompts).
  */
 
-export async function getPastChats(message) {
-  const getChats = await message.channel.messages.fetch({ limit: 10 });
+export async function getPastChats(message, limit) {
+  const getChats = await message.channel.messages.fetch({ limit: Math.round(limit/200) });
   let chats = Array.from(getChats.values());
   chats.sort((a, b) => b.createdTimestamp - a.createdTimestamp );
   chats = chats.filter(c => c.id !== message.id);
@@ -16,7 +16,7 @@ export async function getPastChats(message) {
 
   for (const chat of chats) {
     lengthCounter += chat.content.length;
-    if (lengthCounter < 2002) {
+    if (lengthCounter < limit) {
       const attachmentNames = chat?.attachments?.size
         ? chat.attachments.map(att => att.name)
         : [];

@@ -38,17 +38,17 @@ export async function coder(job, pluginName, message, assistantMessage, model, i
           },
           pluginJava: {
             type: "string",
-            description: `The java code for ${pluginName}.java. The correct package is com.agentsteveofficial
+            description: `The java code for ${pluginName}.java. The correct package is com.walrusmc
             Rules:
             - Only output Java 17 compatible Paper 1.20.1 code.
             - Name the class exactly ${pluginName}.
-            - Use package: com.agentsteveofficial.${pluginName.toLowerCase()}
+            - Use package: com.walrusmc.${pluginName.toLowerCase()}
             - Include correct imports.
             `,
           },
           pluginYML: {
             type: "string",
-            description: `The code for plugin.yml. Must include main: com.agentsteveofficial.${pluginName.toLowerCase()}.${pluginName}`,
+            description: `The code for plugin.yml. Must include main: com.walrusmc.${pluginName.toLowerCase()}.${pluginName}`,
           },
           configYML: {
             type: "string",
@@ -73,7 +73,7 @@ export async function coder(job, pluginName, message, assistantMessage, model, i
     {
         type: "function",
         name: "editPlugin",
-        description: "Makes changes to a plugin via deletions and insertions. The correct package is com.agentsteveofficial.",
+        description: "Makes changes to a plugin via deletions and insertions. The correct package is com.walrusmc.",
         parameters: {
           type: "object",
           properties: {

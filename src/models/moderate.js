@@ -1,9 +1,9 @@
 import OpenAI from "openai";
 import fs from "fs/promises";
-import { sendMsgDiscord } from "./tools/sendMsgDiscord.js";
-import { coder } from "./specialistModels/coder.js"
-import { createLogger } from "./utils/logger.js";
-import { gdoc } from "./tools/google.js";
+import { sendMsgDiscord } from "../tools/sendMsgDiscord.js";
+import { coder } from "./coder.js"
+import { createLogger } from "../utils/logger.js";
+import { gdoc } from "../tools/google.js";
 const client = new OpenAI;
 const log = createLogger("moderate");
 
@@ -64,8 +64,8 @@ export async function moderate(info, toolHistory = []) {
   const { pastChats } = info; // [Array]
   const { summary } = info; // "String"
   const { documents } = info; // {Object}
-  const files = JSON.parse(await fs.readFile(`./db/${message.guildId}/files.json`, "utf-8")); // {Object}
-  const plugins = JSON.parse(await fs.readFile(`./db/${message.guildId}/plugins.json`, "utf-8")); // [Array]
+  const downloads = JSON.parse(await fs.readFile(`./db/${message.guildId}/downloads.json`, "utf-8")); // {Object}
+  const plugins = JSON.parse(await fs.readFile(`./db/${message.guildId}/downloads.json`, "utf-8")); // [Array]
   
   log.debug("Router started for message", message.id);
 
@@ -99,9 +99,9 @@ export async function moderate(info, toolHistory = []) {
         description: "Plugins you have access to.",
         content: plugins
       },
-      files: {
-        description: "Files you have access to.",
-        content: files
+      downloads: {
+        description: "Downloaded files you have access to.",
+        content: downloads
       },
       documents: {
         description: "Google documents referenced by the user. Call the readDoc() tool if you need to access a document that is not listed here.",
@@ -133,7 +133,7 @@ export async function moderate(info, toolHistory = []) {
             description: "Optional. An array of any files that need to be sent to the user.",
             items: { 
               type: "string",
-              enum: Object.keys(files),
+              enum: Object.keys(downloads),
               description: "The name of the file you wish to send."
             },
           },
@@ -307,8 +307,8 @@ export async function moderate(info, toolHistory = []) {
       case "createNewPlugin":
         data = await coder(toolCall.name, args.pluginName, message, args.assistantMessage, args.complex ? "gpt-5.1-codex" : "gpt-5.1-codex-mini");
         if (data.success) {
-          files[data.file] = "A Minecraft plugin JAR.";
-          await fs.writeFile(`./db/${message.guildId}/files.json`, JSON.stringify(files, null, 2));
+          downloads[data.file] = "A Minecraft plugin JAR.";
+          await fs.writeFile(`./db/${message.guildId}/downloads.json`, JSON.stringify(downloads, null, 2));
           toolHistory.push({
             tool: toolCall.name,
             status: "success",

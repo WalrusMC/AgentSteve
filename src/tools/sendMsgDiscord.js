@@ -12,7 +12,7 @@ const separator = "\n"
 
 /**
  * Sends one or more Discord messages, splitting long content at newline boundaries
- * to respect the 2000-character limit. Optionally attaches files from storedFiles.
+ * to respect the 2000-character limit. Optionally attaches files from downloads.
  */
 export async function sendMsgDiscord(msgToSend, initiatingMsg, files = false) {
   const messageSections = [];
@@ -20,7 +20,7 @@ export async function sendMsgDiscord(msgToSend, initiatingMsg, files = false) {
 
   if (!files || !files.length) files = false;
   if (files) files.forEach((element, index) => {
-    files[index] = path.join(__dirname, "storedFiles", initiatingMsg.guildId, element);
+    files[index] = path.join(__dirname, "downloads", initiatingMsg.guildId, element);
   });
 
   // While content remains, split on the nearest newline under 2000 chars
