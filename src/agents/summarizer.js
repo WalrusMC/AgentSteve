@@ -2,6 +2,7 @@ import OpenAI from "openai";
 import fs from "fs/promises";
 import { createLogger } from "../utils/logger.js";
 import { getPastChats } from "../utils/getPastChats.js";
+import { models } from "../models.js";
 
 const client = new OpenAI;
 const log = createLogger("summarizer");
@@ -52,7 +53,7 @@ export async function summarizer(message) {
   const pastChats = await getPastChats(message, 20000);
 
   const response = await client.responses.create({
-    model: "gpt-5-nano",
+    model: models.general.low.slow,
     input: [
       ...prompts,
       { role: "user", content: `(PAST CHATS)\n${JSON.stringify(pastChats, null, 2)}`},

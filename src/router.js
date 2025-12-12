@@ -1,4 +1,4 @@
-import { classifier } from "./models/classifier.js";
+import { classifier } from "./agents/classifier.js";
 
 export async function router(info) {
   const { message } = info;

@@ -2,7 +2,8 @@ import OpenAI from "openai";
 import fs from "fs/promises";
 import { sendMsgDiscord } from "./tools/sendMsgDiscord.js";
 import { createLogger } from "./utils/logger.js";
-import { moderate } from "./models/moderate.js";
+import { moderate } from "./agents/moderate.js";
+import { models } from "./models.js";
 
 const client = new OpenAI;
 const log = createLogger("router");
@@ -182,7 +183,7 @@ export async function router(info) {
   log.debug("Sending routing request to gpt-5-nano");
   log.response("OPENAI INPUT (ROUTER)", `|SYSTEM|\n${systemPrompt}\n|DEVELOPER|\n${devInput}\n|USER|\n${userInput}\n|ASSISTANT|\n${summary}`);
   const response = await client.responses.create({
-    model: "gpt-5-nano",
+    model: models.general.low.slow,
     input: [
       { role: "system", content: systemPrompt },
       { role: "developer", content: devInput },

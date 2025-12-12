@@ -1,5 +1,6 @@
 import OpenAI from "openai";
 import { getPastChats } from "../utils/getPastChats.js";
+import { models } from "../models.js";
 
 const client = new OpenAI();
 
@@ -25,7 +26,7 @@ export async function classifier(message) {
 
   // Send request to OpenAI
   const response = await client.responses.create({
-    "model": "gpt-4.1-nano",
+    "model": models.general.low.fast,
     "input": [
       {
         "role": "system",

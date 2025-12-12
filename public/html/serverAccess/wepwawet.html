@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>WalrusMC AI Agents | Enable Server Access</title>
+
+  <!-- Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Open+Sans:ital,wght@0,300..800;1,300..800&display=swap" rel="stylesheet">
+
+  <!-- CSS -->
+  <link rel="stylesheet" href="../../css/style.css">
+
+  <!-- Script -->
+  <script type="module">
+    document.addEventListener("DOMContentLoaded", () => {
+      const params = new URLSearchParams(window.location.search);
+      const status = params.get("status");
+      const infoMsg = document.getElementById("infoMsg");
+
+      const messages = {
+        ACCESS_GRANTED: {
+          text: "Success! Steve now has access to your Wepwawet server.",
+          type: "success"
+        },
+        ALREADY_ACCESSIBLE: {
+          text: "Steve already has access to your server — you're good to go!",
+          type: "info"
+        },
+        NO_ACCESS: {
+          text: "Steve has not been added as a subuser to that server.",
+          type: "error"
+        },
+        NO_SERVER: {
+          text: "You haven't added agentsteveofficial@gmail.com as a subuser, or the server you entered does not exist.",
+          type: "error"
+        },
+        NO_FILE: {
+          text: "agentsteve.txt was not found in your server's root directory.",
+          type: "error"
+        },
+        INCORRECT_FILE: {
+          text: "The code inside agentsteve.txt is incorrect.",
+          type: "error"
+        },
+        INVALID_KEY: {
+          text: "Internal server error. Please contact support.",
+          type: "error"
+        },
+        UNKNOWN: {
+          text: "Internal server error. Please contact support.",
+          type: "error"
+        },
+        INTERNAL_SERVER_ERROR: {
+          text: "Internal server error. Please contact support.",
+          type: "error"
+        },
+        500: {
+          text: "agentsteve.txt was not found in your server's root directory, or an internal error occurred.",
+          type: "error"
+        }
+      };
+
+
+      if (status && messages[status]) {
+        infoMsg.textContent = messages[status].text;
+        infoMsg.classList.add("visible");
+        infoMsg.classList.remove("success", "error", "info");
+        infoMsg.classList.add("info-message", messages[status].type);
+      }
+
+      const guild = params.get("guild");
+      if (guild) {
+        document.getElementById("guildInput").value = guild;
+        document.getElementById("guildCode").textContent = guild;
+      }
+    });
+  </script>
+</head>
+
+<body>
+  <div class="page-container">
+
+    <header>
+      <h1>Enable Server Access</h1>
+      <h2>Grant Agent Steve access to your Wepwawet server</h2>
+    </header>
+
+    <div class="card">
+
+      <ol class="steps">
+        <li>
+          <strong>Add Steve as a subuser</strong>
+          <ul>
+            <li>Open the <a href="https://panel.wepwawet.net" target="_blank">Wepwawet Panel</a></li>
+            <li>Select your server -> <em>Access</em> -> <em>Users</em></li>
+            <li>Add <code>agentsteveofficial@gmail.com</code></li>
+          </ul>
+        </li>
+
+        <li>
+          <strong>Create access file</strong>
+          <ul>
+            <li>Create a file named <code>agentsteve.txt</code> in your server root</li>
+            <li>Paste this code inside:</li>
+          </ul>
+          <div class="code-box" id="guildCode">LOADING...</div>
+        </li>
+
+        <li>
+          <strong>Verify access</strong>
+          <ul>
+            <li>Find your server ID in the server console</li>
+            <li>Enter it below and click <em>Check</em></li>
+          </ul>
+        </li>
+      </ol>
+
+      <form class="verify-form" action="/aiagents/serveraccess/wepwawet/check" method="POST" autocomplete="off">
+        <input type="hidden" id="guildInput" name="guild" value="">
+        <input type="text" name="server" placeholder="Enter Server ID" required>
+        <button type="submit">Check Access</button>
+      </form>
+
+      <p id="infoMsg" class="info-message"></p>
+    </div>
+
+    <footer>
+      <p>WalrusMC AI Agents - Agent Steve</p>
+    </footer>
+
+  </div>
+</body>
+</html>

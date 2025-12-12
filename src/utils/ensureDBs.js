@@ -24,6 +24,7 @@ export async function ensureDBs(guildId) {
   await ensureDir(guildDbDir);
   await ensureDir(downloadsDir);
 
+  await ensureFile(path.join(guildDbDir, "servers.json"), "{}")
   await ensureFile(path.join(guildDbDir, "files.json"), "{}");
   await ensureFile(path.join(guildDbDir, "summaries.json"), "{}");
   await ensureFile(path.join(guildDbDir, "whitelist.json"), JSON.stringify({ users: [], roles: [] }, null, 2));

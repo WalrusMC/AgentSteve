@@ -4,6 +4,7 @@ import { sendMsgDiscord } from "../tools/sendMsgDiscord.js";
 import { coder } from "./coder.js"
 import { createLogger } from "../utils/logger.js";
 import { gdoc } from "../tools/google.js";
+import { models } from "../models.js";
 const client = new OpenAI;
 const log = createLogger("moderate");
 
@@ -284,7 +285,7 @@ export async function moderate(info, toolHistory = []) {
   // Send request to OpenAI API
   log.response("OPENAI INPUT (MODERATE)", `|SYSTEM|\n${systemPrompt}\n|DEVELOPER|\n${devInput}\n|USER|\n${userInput}\n|ASSISTANT|\n${assistantInput}`);
   const response = await client.responses.create({
-    model: "gpt-5-mini",
+    model: models.general.medium.slow,
     input: [
       { role: "system", content: systemPrompt },
       { role: "developer", content: devInput },
@@ -305,7 +306,7 @@ export async function moderate(info, toolHistory = []) {
         return await sendMsgDiscord(args.responseText, message, args.files);
       case "editPlugin":
       case "createNewPlugin":
-        data = await coder(toolCall.name, args.pluginName, message, args.assistantMessage, args.complex ? "gpt-5.1-codex" : "gpt-5.1-codex-mini");
+        data = await coder(toolCall.name, args.pluginName, message, args.assistantMessage, args.complex ? models.coder.high.slow : models.coder.medium.slow);
         if (data.success) {
           downloads[data.file] = "A Minecraft plugin JAR.";
           await fs.writeFile(`./db/${message.guildId}/downloads.json`, JSON.stringify(downloads, null, 2));

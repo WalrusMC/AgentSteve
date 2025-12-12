@@ -2,6 +2,7 @@ import OpenAI from "openai"
 import { createLogger } from "../utils/logger.js";
 import { getPastChats } from "../utils/getPastChats.js";
 import { plugin } from "../tools/plugin.js";
+import { models } from "../models.js";
 
 const client = new OpenAI;
 const log = createLogger("coder");
@@ -206,14 +207,14 @@ export async function coder(job, pluginName, message, assistantMessage, model, i
         if (data.success) {
           return data;
         } else {
-          return coder("fixCrash", pluginName, message, assistantMessage, "gpt-5.1-codex", plugin.crashReport(pluginName, data.version, data.code, data.error));
+          return coder("fixCrash", pluginName, message, assistantMessage, models.coder.high.slow, plugin.crashReport(pluginName, data.version, data.code, data.error));
         }
       case "editPlugin":
         data = await plugin.edit(pluginName, args?.pluginDescription, args?.deletions, args?.insertions, args?.addDependencies, args?.removeDependencies, message.guildId);
         if (data.success) {
           return data;
         } else {
-          return coder("fixCrash", pluginName, message, assistantMessage, "gpt-5.1-codex", plugin.crashReport(pluginName, data.version, data.code, data.error));
+          return coder("fixCrash", pluginName, message, assistantMessage, models.coder.high.slow, plugin.crashReport(pluginName, data.version, data.code, data.error));
         }
       default:
         log.error("GPT did not call a valid tool.");
