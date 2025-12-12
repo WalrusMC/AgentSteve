@@ -31,15 +31,15 @@ server.addNew = async function (guildId, serverId) {
   const servers = await readServers(guildId);
   const serverIds = Object.keys(servers);
 
-  if (serverIds.includes(serverId)) {
-    return "ALREADY_ACCESSIBLE";
-  }
-
   let serverDetails;
   try {
     serverDetails = await api.get(`/servers/${serverId}`);
   } catch (err) {
     const status = err?.response?.status;
+    if (serverIds.includes(serverId)) {
+      delete servers[serverId];
+      await fs.writeFile(`./db/${guildId}/servers.json`, JSON.stringify(servers, null, 2));
+    }
     switch (status) {
       case 403:
         return "NO_ACCESS";
@@ -49,12 +49,16 @@ server.addNew = async function (guildId, serverId) {
         log.error(err);
         return "INVALID_KEY";
       case 500:
-        log.error("DAMN IT, IT'S THE INITIAL SERVER REQUEST");
+        log.error("We have a problem folks. The initial request to Wepwawet is giving off an error.");
         return "500";
       default:
         log.error(err);
         return "UNKNOWN";
     }
+  }
+
+  if (serverIds.includes(serverId)) {
+    return "ALREADY_ACCESSIBLE";
   }
 
   const serverName = serverDetails?.data?.attributes?.name || serverId;
