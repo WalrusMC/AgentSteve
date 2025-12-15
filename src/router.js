@@ -1,4 +1,5 @@
 import { classifier } from "./agents/classifier.js";
+import { moderate } from "./agents/moderate.js";
 
 export async function router(info) {
   const { message } = info;
@@ -21,9 +22,9 @@ export async function router(info) {
   if (complexFlags.some(boolean => boolean)) {
     message.reply("Complex");
   } else if (Object.values(routingFlags).some(boolean => boolean)) {
-    message.reply("Moderate");
+    return await moderate(info);
   } else {
-    message.reply("Simple");
+    return await moderate(info);
   }
 
 }

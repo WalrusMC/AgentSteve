@@ -1,2 +1,2 @@
 import "./src/index.js";
-import "./src/server/server.js";
+import "./src/api/server.js";

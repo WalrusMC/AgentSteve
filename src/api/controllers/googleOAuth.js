@@ -5,7 +5,7 @@ const KEY_FILE = JSON.parse(await fs.readFile("./google-key-file.json"));
 const oauth2Client = new google.auth.OAuth2(
   KEY_FILE.web.client_id,
   KEY_FILE.web.client_secret,
-  "http://localhost:3000/oauth/google/callback"
+  "http://localhost:3000/aiagents/steve/oauth/google/callback"
 );
 
 export async function googleOAuth(req, res) {
@@ -15,7 +15,7 @@ export async function googleOAuth(req, res) {
     const userId = state[0];
     const guildId = state[1];
     if (!code || !state) {
-      return res.status(400).send("Missing code or state.");
+      return res.status(400).send(false);
     }
 
     const { tokens } = await oauth2Client.getToken(code);
@@ -30,8 +30,8 @@ export async function googleOAuth(req, res) {
 
     await fs.writeFile(`./db/${guildId}/users.json`, JSON.stringify(users, null, 2));
 
-    return res.status(200).send("Authorization successful! You may return to Discord.");
+    return res.status(200).send(true);
   } catch (err) {
-    return res.status(500).send("Failed to authorize. Please try again.");
+    return res.status(500).send(false);
   }
 }

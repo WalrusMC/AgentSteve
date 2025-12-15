@@ -66,9 +66,9 @@ export async function moderate(info, toolHistory = []) {
   const { summary } = info; // "String"
   const { documents } = info; // {Object}
   const downloads = JSON.parse(await fs.readFile(`./db/${message.guildId}/downloads.json`, "utf-8")); // {Object}
-  const plugins = JSON.parse(await fs.readFile(`./db/${message.guildId}/downloads.json`, "utf-8")); // [Array]
+  const plugins = JSON.parse(await fs.readFile(`./db/${message.guildId}/plugins.json`, "utf-8")); // [Array]
   
-  log.debug("Router started for message", message.id);
+  log.debug("Moderate started for message", message.id);
 
 
   // Current User Message
