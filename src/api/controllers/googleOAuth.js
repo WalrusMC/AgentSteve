@@ -1,6 +1,10 @@
 import fs from "fs/promises";
 import { google } from "googleapis";
+import { createLogger } from "../../utils/logger.js";
 
+const log = createLogger();
+
+// Load OAuth client secrets
 const KEY_FILE = JSON.parse(await fs.readFile("./google-key-file.json"));
 const oauth2Client = new google.auth.OAuth2(
   KEY_FILE.web.client_id,
@@ -10,28 +14,39 @@ const oauth2Client = new google.auth.OAuth2(
 
 export async function googleOAuth(req, res) {
   try {
-    const code = req.query.code;
-    const state = req.query.state?.split(",");
-    const userId = state[0];
-    const guildId = state[1];
-    if (!code || !state) {
-      return res.status(400).send(false);
+    const token = req.body?.token;
+    const guild = req.body?.guild;
+    const user = req.body?.user;
+
+    // Require OAuth token and state data
+    if (!token || !user || !guild) {
+      log.error("Google OAuth callback missing required fields.", {
+        hasToken: !!token,
+        hasUser: !!user,
+        hasGuild: !!guild,
+        contentType: req.headers?.["content-type"],
+        bodyKeys: Object.keys(req.body || {}),
+      });
+      return res.status(400).json({ error: "Missing token, user, or guild" });
     }
 
-    const { tokens } = await oauth2Client.getToken(code);
-    oauth2Client.setCredentials(tokens);
-
+    // Load existing users (if any)
     let users = {};
     try {
-      users = JSON.parse(await fs.readFile(`./db/${guildId}/users.json`, "utf8"));
-    } catch {}
+      users = JSON.parse(await fs.readFile(`./db/${guild}/users.json`, "utf8"));
+    } catch {
+      log.error("The users.json file could not be found.")
+      return res.sendStatus(500);
+    }
 
-    users[userId] = { ...(users[userId] || {}), token: tokens };
+    // Persist tokens under `tokens` for the requesting user (matches gdoc.read)
+    users[user] = { ...(users[user] || {}), tokens: token };
 
-    await fs.writeFile(`./db/${guildId}/users.json`, JSON.stringify(users, null, 2));
+    await fs.writeFile(`./db/${guild}/users.json`, JSON.stringify(users, null, 2));
 
-    return res.status(200).send(true);
+    return res.sendStatus(204);
   } catch (err) {
-    return res.status(500).send(false);
+    log.error("Google OAuth failed:", err?.message || err);
+    return res.sendStatus(500);
   }
 }

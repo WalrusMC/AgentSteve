@@ -6,10 +6,11 @@ const CLIENT_SECRET = KEY_FILE.client_secret;
 const CLIENT_ID = KEY_FILE.client_id;
 const SCOPES = ["https://www.googleapis.com/auth/documents.readonly"];
 
+// Web server proxies the callback at /aiagents/steve/oauth/google/callback
 const oauth2Client = new google.auth.OAuth2(
   CLIENT_ID,
   CLIENT_SECRET,
-  "http://localhost:3000/oauth/google/callback"
+  "http://localhost:3000/aiagents/steve/oauth/google/callback"
 );
 
 export const gdoc = {};
@@ -60,7 +61,8 @@ gdoc.read = async function(content, message, ids) {
   };
 
   // Get latest authorization token
-  const token = JSON.parse(await fs.readFile(`./db/${message.guildId}/users.json`))?.[message.author.id]?.token;
+  const userRecord = JSON.parse(await fs.readFile(`./db/${message.guildId}/users.json`))?.[message.author.id];
+  const tokens = userRecord?.tokens || userRecord?.token;
 
 
   // Create authorization URL
@@ -72,7 +74,7 @@ gdoc.read = async function(content, message, ids) {
   });
 
   // If no token, get a new token
-  if (!token) {
+  if (!tokens) {
     await message.reply(`I need permission to view that document. Click [this link](<${authUrl}>) to give me permission.`);
     return {
       success: false,
@@ -80,7 +82,7 @@ gdoc.read = async function(content, message, ids) {
     };
   }
 
-  oauth2Client.setCredentials(token);
+  oauth2Client.setCredentials(tokens);
 
   // Create docs client
   const docs = google.docs({ version: "v1", auth: oauth2Client });
@@ -94,7 +96,7 @@ gdoc.read = async function(content, message, ids) {
         includeTabsContent: true
       });
     } catch (err) {
-      if (err?.response?.status === 401 || err.response.status === 403) {
+      if (err.response.status === 401 || err.response.status === 403) {
         await message.reply(`I need permission to view this document: <https://docs.google.com/document/d/${id}/>. Click [this link](<${authUrl}>) to give me permission.`);
         return {
           success: false,
