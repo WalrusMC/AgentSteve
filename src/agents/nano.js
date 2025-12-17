@@ -1,12 +1,12 @@
 import OpenAI from "openai";
 import fs from "fs/promises";
-import { sendMsgDiscord } from "./tools/sendMsgDiscord.js";
-import { createLogger } from "./utils/logger.js";
-import { moderate } from "./agents/moderate.js";
-import { models } from "./models.js";
+import { sendMsgDiscord } from "../tools/sendMsgDiscord.js";
+import { createLogger } from "../utils/logger.js";
+import { moderate } from "./moderate.js";
+import { models } from "../models.js";
 
 const client = new OpenAI;
-const log = createLogger("router");
+const log = createLogger("nano");
 
 const systemPrompt = `You are Steve, an AI assistant for Minecraft server owners. You live on Discord and you help users with tasks such as:
 
@@ -20,13 +20,12 @@ You speak in a friendly, concise, professional tone.
 You respond exactly as Steve would, even when choosing tools.
 `;
 
-const developerPrompt = `You are the routing controller for Steve, part of a multi-model architecture.
+const developerPrompt = `You are the nano responder for Steve, part of a multi-model architecture.
 
-Your job:
-Analyze the currentUserMessage (and any relevant context) and choose exactly ONE tool to call:
-- respond()      → For simple messages you can answer directly without using external systems.
-- moderate()     → For typical requests involving planning, tool use, code creation/modification, or single-step server operations.
-- complex()      → For very difficult or large workflows requiring multi-step reasoning, dependency chains, testing, or multiple server actions.
+Your job is to do one of the following:
+Respond to the currentUserMessage yourself via the respond() tool.
+OR, if the user is asking for something that Steve (as the whole multi-model AI system) can do, but you (as the nano responder) can not do
+Forward the user request to the moderate responder via moderate().
 
 What the full Steve system CAN DO (through the other models):
 - Create, modify, and debug Minecraft plugins
@@ -35,78 +34,41 @@ What the full Steve system CAN DO (through the other models):
 - Execute multi-step workflows with reasoning, error correction, and iteration
 - Retrieve structured data, brainstorm ideas, and provide step-by-step instructions
 
-What YOU (the router) can do:
+What YOU (the nano responder) can do:
 - You can respond with plain text and files and use Discord formatting (bold, italics, inline code, code blocks, emoji).
 - You can see the user message, past chats, and an assistant memorySummary of the current chat channel.
 Never respond yourself IF: 
 - If the user request requires real-time or outside information.
 - The user request is asking you to do something other than respond with plain text and/or files.
 
-ROUTING RULES (ordered by priority, highest first):
-
-1) complex()  
-Use this when:
-- The request requires multi-step dependent reasoning  
-- OR multiple tool calls  
-- OR interactions with multiple server systems  
-- OR debugging, testing, or iterative improvement  
-Examples:  
-“Optimize the server after analyzing logs”,  
-“Scan this plugin and fix all issues”,  
-“Set up an entire event workflow.”
-
-2) moderate()  
-Use this when the request:  
-- Involves plugin creation or modification  
-- Requires reading, writing, or editing files  
-- Requires Google Docs access  
-- Needs a single tool use or simple workflow  
-- Requires structured planning or step-by-step instructions  
-Examples:  
-“Make a plugin that…”,  
-“Modify this plugin so that…”,  
-“Start the server”,  
-"Look at this document..."
-
-3) respond()  
-Use this when the message:  
-- Is conversational, emotional, or informational  
-- AND can be answered in ~7 sentences or fewer  
-- AND requires no tools and no external data  
-Examples:  
-“How are you?”,  
-“What is PaperMC?”,  
-“Explain how chunk loading works.”
-
-Fallback rule:  
-If uncertain, choose the MORE complex option (complex > moderate > respond).
-
 Output rules:  
-- You MUST call exactly ONE tool: respond(), moderate(), or complex().  
+- You MUST call exactly ONE tool: respond() or moderate().  
 - DO NOT output anything besides the tool call.  
 - DO NOT explain your reasoning.  
-- DO NOT apologize or claim inability. If something seems hard, route it upward.
+- DO NOT apologize or claim inability. If something seems hard, call the moderate() tool.
 - If you ever find yourself about to say “I cannot,” “I don’t have access,” or any similar disclaimer, STOP and instead call the moderate() tool.
 
 `
 
 /**
- * Routes a Discord message to the appropriate model or responds directly.
- * - Uses gpt-5-nano as a lightweight "reasoning controller" to either forward
- *   to a bigger model or answer directly when trivial.
+ * Nano Responder
+ * 
+ * Responds to the user message or routes it up to the moderate responder.
+ * - Uses gpt-5-nano as a lightweight reasoning controller and responder to either forward
+ *   to the moderate responder or answer directly when trivial.
  */
-export async function router(info) {
+export async function nano(info) {
   const { message } = info; // {Object}
   const { pastChats } = info; // [Array]
   const { summary } = info; // "String"
   const files = JSON.parse(await fs.readFile(`./db/${message.guildId}/files.json`, "utf-8")); // {Object}
   const plugins = await fs.readFile(`./db/${message.guildId}/plugins.json`, "utf-8"); // [Array]
   
-  log.debug("Router started for message", message.id);
+  log.debug("Nano responder started for message", message.id);
 
 
   // Current User Message
-  const attachmentNames = message?.attachments?.size 
+  const attachmentNames = message?.attachments?.size
   ? message.attachments.map(att => att.name)
   : [];
   const currentUserMessage = {
@@ -133,7 +95,7 @@ export async function router(info) {
         content: plugins
       },
       files: {
-        description: "Downloaded files Steve and you (the router) have access to.",
+        description: "Downloaded files Steve and you (the nano responder) have access to.",
         content: files
       }
     }
@@ -171,17 +133,13 @@ export async function router(info) {
     {
       type: "function",
       name: "moderate",
-    },
-    {
-      type: "function",
-      name: "complex",
-    },
+    }
   ];
 
 
   // Send initial route decision request to OpenAI
-  log.debug("Sending routing request to gpt-5-nano");
-  log.response("OPENAI INPUT (ROUTER)", `|SYSTEM|\n${systemPrompt}\n|DEVELOPER|\n${devInput}\n|USER|\n${userInput}\n|ASSISTANT|\n${summary}`);
+  log.debug(`Sending request to ${models.general.low.slow}`);
+  log.response("OPENAI INPUT (NANO)", `|SYSTEM|\n${systemPrompt}\n|DEVELOPER|\n${devInput}\n|USER|\n${userInput}\n|ASSISTANT|\n${summary}`);
   const response = await client.responses.create({
     model: models.general.low.slow,
     input: [
@@ -192,7 +150,7 @@ export async function router(info) {
     ],
     tools: tools
   });
-  log.response("ROUTER RESPONSE", response);
+  log.response("NANO RESPONSE", response);
 
   // Call tools
   const toolCall = response?.output?.find?.(c => c.type === "function_call" || c.type === "tool_call");
@@ -201,32 +159,27 @@ export async function router(info) {
     const args = JSON.parse(toolCall.arguments);
     switch (toolCall.name) {
       case "respond":
-        log.debug("The router chose to respond itself.");
-        return sendMsgDiscord(args.responseText, message, args.files);
+        log.debug("The nano responder chose to respond itself.");
+        return await sendMsgDiscord(args.responseText, message, args.files);
       case "moderate":
-        log.debug("The router evaluated the message as moderately complex");
-        return moderate(info);
-      case "complex":
-        log.debug("The router evaluated the message as complex",);
-        return sendMsgDiscord("This message is very complex, and I'm going to send it the Workflow Orchestrator.", message);
+        log.debug("The nano responder decided to forward the message.");
+        return await moderate(info);
       default:
-        log.error("The router did not call a valid tool.")
+        log.error("The nano responder did not call a valid tool.")
         return await sendMsgDiscord("Oh no! An error has occured.", message);
     }
   } else if (responseText) {
     switch (responseText) {
+      case "moderate()":
       case "moderate":
-        log.warn("The router returned output text and evaluated the message as moderately complex");
-        return moderate(info);
-      case "complex":
-        log.warn("The router returned output text and evaluated the message as complex",);
-        return sendMsgDiscord("This message is very complex, and I'm going to send it the Workflow Orchestrator.", message);
+        log.warn("The nano responder returned output text and decided to forward the message.");
+        return await moderate(info);
       default:
-        log.warn("The router returned output text: sending text to the user.");
-        return sendMsgDiscord(responseText, message);
+        log.error("The nano responder returned output text. Aborting.");
+        return await sendMsgDiscord("Oh no! An error has occured.", message);
     }
   } else {
-    log.error("The router did not call a tool or return output text.");
+    log.error("The nano responder did not call a tool or return output text.");
     return await sendMsgDiscord("Oh no! An error has occured.", message);
   }
 

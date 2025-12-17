@@ -1,5 +1,6 @@
 import { classifier } from "./agents/classifier.js";
 import { moderate } from "./agents/moderate.js";
+import { nano } from "./agents/nano.js";
 
 export async function router(info) {
   const { message } = info;
@@ -24,7 +25,7 @@ export async function router(info) {
   } else if (Object.values(routingFlags).some(boolean => boolean)) {
     return await moderate(info);
   } else {
-    return await moderate(info);
+    return await nano(info);
   }
 
 }

@@ -2,7 +2,7 @@ import { isUserAllowed } from "./whitelist.js";
 
 /**
  * Returns an array of past chat objects.
- * for model context. Newest messages appear last. Limited to ~2000 chars.
+ * for model context. Newest messages appear last.
  * Labels senders as ADMINISTRATOR if they are whitelisted (aligned with prompts).
  */
 
