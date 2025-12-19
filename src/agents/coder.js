@@ -24,7 +24,10 @@ ONLY return a tool call.`;
  * 
  * job = createNewPlugin, editPlugin, fixCrash
  */
-export async function coder(job, pluginName, message, assistantMessage, model, info) {
+
+export async function coder(job, pluginName, assistantMessage, model, info, data) {
+  const { message } = info;
+  const { pastChats } = info;
   const toolsArray = [
     { 
       type: "function",
@@ -142,7 +145,7 @@ export async function coder(job, pluginName, message, assistantMessage, model, i
       tool = toolsArray[0];
       break;
     case "editPlugin":
-      info = await plugin.retrieveCode(pluginName, ["pluginJava", "pluginYML", "configYML"], message.guildId);
+      data = await plugin.retrieveCode(pluginName, ["pluginJava", "pluginYML", "configYML"], message.guildId);
       developerPrompt = `Your job is to edit a Paper 1.20.1 Minecraft plugin called ${pluginName} to fufill the user request by calling 
       using the **editPlugin** tool. You may use your assistant message to understand the user intent and your past chats to 
       understand the context of the current user message.
@@ -156,7 +159,7 @@ export async function coder(job, pluginName, message, assistantMessage, model, i
 
       The plugin code is represented by an array of objects [{ line: number, content: string }]
       Here is the plugin code:
-      ${info}`;
+      ${data}`;
       tool = toolsArray[1];
       break;
     case "fixCrash":
@@ -164,7 +167,7 @@ export async function coder(job, pluginName, message, assistantMessage, model, i
       You may use the user prompt and assistant message to understand the context of the plugin.
       Maven crashed while trying to build this plugin into a JAR. 
       Call the **editPlugin** tool to fix the plugin.
-      ${info}`;
+      ${data}`;
       tool = toolsArray[1];
       break;
   }
@@ -176,7 +179,6 @@ export async function coder(job, pluginName, message, assistantMessage, model, i
   ]
 
   // User input and past chats
-  const pastChats = await getPastChats(message);
   const attachmentNames = message?.attachments?.size 
   ? Array.from(message.attachments.values()).map(a => a.name).join(",")
   : "";
@@ -207,27 +209,27 @@ export async function coder(job, pluginName, message, assistantMessage, model, i
         if (data.success) {
           return data;
         } else {
-          return coder("fixCrash", pluginName, message, assistantMessage, models.coder.high.slow, plugin.crashReport(pluginName, data.version, data.code, data.error));
+          return coder("fixCrash", pluginName, assistantMessage, models.coder.high.slow, info, plugin.crashReport(pluginName, data.version, data.code, data.error), );
         }
       case "editPlugin":
         data = await plugin.edit(pluginName, args?.pluginDescription, args?.deletions, args?.insertions, args?.addDependencies, args?.removeDependencies, message.guildId);
         if (data.success) {
           return data;
         } else {
-          return coder("fixCrash", pluginName, message, assistantMessage, models.coder.high.slow, plugin.crashReport(pluginName, data.version, data.code, data.error));
+          return coder("fixCrash", pluginName, message, assistantMessage, models.coder.high.slow, info, plugin.crashReport(pluginName, data.version, data.code, data.error));
         }
       default:
         log.error("GPT did not call a valid tool.");
         return {
           success: false,
-          error: "GPT did not call a valid tool",
+          error: "An internal error has occurred.",
         };
     }
   } else {
     log.error("GPT did not call a tool.");
     return {
       success: false,
-      error: "GPT did not call a tool",
+      error: "An internal error has occurred.",
     };
   }
 

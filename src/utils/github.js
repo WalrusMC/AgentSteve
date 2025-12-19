@@ -14,8 +14,10 @@ const api = axios.create({
   },
 });
 
-export async function createRepo(repo, guildId) {
-  const repos = await listRepos(guildId);
+export const github = {};
+
+github.createRepo = async function(repo, guildId) {
+  const repos = await this.listRepos(guildId);
   if (repos.includes(repo)) return false;
   await api.post("/user/repos", {
     name: `${guildId}-${repo}`,
@@ -24,7 +26,7 @@ export async function createRepo(repo, guildId) {
   return true;
 }
 
-export async function writeFile(repo, path, content, message, guildId) {
+github.writeFile = async function(repo, path, content, message, guildId) {
   const branch = "main";
   let sha;
   try {
@@ -47,7 +49,7 @@ export async function writeFile(repo, path, content, message, guildId) {
   });
 }
 
-export async function listRepos(guildId) {
+github.listRepos = async function(guildId) {
   const res = await api.get("/user/repos");
   const scoped = res.data
     .map(repo => repo.name)
@@ -55,7 +57,7 @@ export async function listRepos(guildId) {
   return scoped.map(name => name.replace(`${guildId}-`, ""));
 }
 
-export async function getFile(repo, path, guildId) {
+github.getFile = async function(repo, path, guildId) {
   const branch = "main";
   const res = await api.get(`/repos/agent-steve-official/${guildId}-${repo}/contents/${path}`, {
     params: { ref: branch },
@@ -63,6 +65,6 @@ export async function getFile(repo, path, guildId) {
   return Buffer.from(res.data.content, "base64").toString("utf-8");
 }
 
-export async function deleteRepo(repo, guildId) {
+github.deleteRepo = async function(repo, guildId) {
   await api.delete(`/repos/agent-steve-official/${guildId}-${repo}`);
 }

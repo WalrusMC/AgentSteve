@@ -55,7 +55,7 @@ export async function classifier(message) {
 
             "needs_multiple_server_actions": { 
               "type": "boolean",
-              "description": "The server refers to a remote Minecraft server and some actions include: start/stop server, file interaction, and command execution."
+              "description": "The server refers to a remote Minecraft server and some server actions include: start/stop server, file interaction, and command execution."
              },
             "needs_code_execution_or_debugging_or_testing": { "type": "boolean" },
             "needs_large_workflow": { "type": "boolean" }

@@ -21,7 +21,7 @@ export async function router(info) {
   const complexFlags = [routingFlags.needs_large_workflow, routingFlags.needs_code_execution_or_debugging_or_testing, routingFlags.needs_multiple_server_actions];
 
   if (complexFlags.some(boolean => boolean)) {
-    message.reply("Complex");
+    return await message.reply("Complex");
   } else if (Object.values(routingFlags).some(boolean => boolean)) {
     return await moderate(info);
   } else {

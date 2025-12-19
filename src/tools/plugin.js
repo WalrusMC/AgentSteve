@@ -4,7 +4,7 @@ import fs from "fs/promises";
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { createLogger } from "../utils/logger.js";
-import { createRepo, writeFile, getFile } from "../utils/github.js";
+import { github } from "../utils/github.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -157,7 +157,7 @@ plugin.createNew = async function(pluginName, pluginDescription, pluginJava, plu
   if (!configYML?.length) configYML = "# No config right now";
 
   // Create GitHub Repo
-  if (!await createRepo(pluginName, guildId)) return { success: false, error: "You tried to create a new plugin, but a plugin with that name already exists!" }
+  if (!await github.createRepo(pluginName, guildId)) return { success: false, error: "You tried to create a new plugin, but a plugin with that name already exists!" }
 
   // Create dependency string
   // Keep dependencies as structured XML blocks so edits can add/remove them later.
@@ -231,11 +231,11 @@ plugin.createNew = async function(pluginName, pluginDescription, pluginJava, plu
   `
 
   // Write files to GitHub
-  await writeFile(pluginName, `src/main/java/com/walrusmc/${pluginName}.java`, pluginJava, "Initial commit", guildId);
-  await writeFile(pluginName, `src/main/resources/plugin.yml`, pluginYML, "Initial commit", guildId);
-  await writeFile(pluginName, `src/main/resources/config.yml`, configYML, "Initial commit", guildId);
-  await writeFile(pluginName, `pom.xml`, pomXML, "Initial commit", guildId);
-  await writeFile(pluginName, "dependencies.json", JSON.stringify(dependencyBlocks, null, 2), "Dependencies", guildId);
+  await github.writeFile(pluginName, `src/main/java/com/walrusmc/${pluginName}.java`, pluginJava, "Initial commit", guildId);
+  await github.writeFile(pluginName, `src/main/resources/plugin.yml`, pluginYML, "Initial commit", guildId);
+  await github.writeFile(pluginName, `src/main/resources/config.yml`, configYML, "Initial commit", guildId);
+  await github.writeFile(pluginName, `pom.xml`, pomXML, "Initial commit", guildId);
+  await github.writeFile(pluginName, "dependencies.json", JSON.stringify(dependencyBlocks, null, 2), "Dependencies", guildId);
 
   // Write file name to db
   const pluginsDbPath = path.join("db", guildId, "plugins.json");
@@ -285,13 +285,13 @@ plugin.edit = async function(pluginName, pluginDescription, deletions = [], inse
   const currentVersion = existingPlugin?.version || "1.0.0";
   const pluginVersion = bumpPatchVersion(currentVersion);
 
-  let pluginJava = await getFile(pluginName, `src/main/java/com/walrusmc/${pluginName}.java`, guildId);
-  let pluginYML = await getFile(pluginName, `src/main/resources/plugin.yml`, guildId);
-  let configYML = await getFile(pluginName, `src/main/resources/config.yml`, guildId);
+  let pluginJava = await github.getFile(pluginName, `src/main/java/com/walrusmc/${pluginName}.java`, guildId);
+  let pluginYML = await github.getFile(pluginName, `src/main/resources/plugin.yml`, guildId);
+  let configYML = await github.getFile(pluginName, `src/main/resources/config.yml`, guildId);
 
   let dependencies = [];
   try {
-    dependencies = JSON.parse(await getFile(pluginName, "dependencies.json", guildId));
+    dependencies = JSON.parse(await github.getFile(pluginName, "dependencies.json", guildId));
   } catch {
     dependencies = [];
   }
@@ -302,21 +302,21 @@ plugin.edit = async function(pluginName, pluginDescription, deletions = [], inse
   if (updatedPluginJava !== pluginJava) {
     log.info(`Applying changes to ${pluginName}.java`);
     pluginJava = updatedPluginJava;
-    await writeFile(pluginName, `src/main/java/com/walrusmc/${pluginName}.java`, pluginJava, `Update ${pluginName}.java to ${pluginVersion}`, guildId);
+    await github.writeFile(pluginName, `src/main/java/com/walrusmc/${pluginName}.java`, pluginJava, `Update ${pluginName}.java to ${pluginVersion}`, guildId);
   }
 
   const updatedPluginYML = applyTextChanges(pluginYML, "pluginYML", sanitizedDeletions, sanitizedInsertions);
   if (updatedPluginYML !== pluginYML) {
     log.info(`Applying changes to ${pluginName} plugin.yml`);
     pluginYML = updatedPluginYML;
-    await writeFile(pluginName, `src/main/resources/plugin.yml`, pluginYML, `Update plugin.yml to ${pluginVersion}`, guildId);
+    await github.writeFile(pluginName, `src/main/resources/plugin.yml`, pluginYML, `Update plugin.yml to ${pluginVersion}`, guildId);
   }
 
   const updatedConfigYML = applyTextChanges(configYML, "configYML", sanitizedDeletions, sanitizedInsertions);
   if (updatedConfigYML !== configYML) {
     log.info(`Applying changes to ${pluginName} config.yml`);
     configYML = updatedConfigYML;
-    await writeFile(pluginName, `src/main/resources/config.yml`, configYML, `Update config.yml to ${pluginVersion}`, guildId);
+    await github.writeFile(pluginName, `src/main/resources/config.yml`, configYML, `Update config.yml to ${pluginVersion}`, guildId);
   }
 
   if (dependenciesToRemove.length) {
@@ -405,8 +405,8 @@ plugin.edit = async function(pluginName, pluginDescription, deletions = [], inse
 </project>
 `;
 
-  await writeFile(pluginName, "pom.xml", pomXML, `Update pom.xml to ${pluginVersion}`, guildId);
-  await writeFile(pluginName, "dependencies.json", JSON.stringify(dependencies, null, 2), "Update dependencies list", guildId);
+  await github.writeFile(pluginName, "pom.xml", pomXML, `Update pom.xml to ${pluginVersion}`, guildId);
+  await github.writeFile(pluginName, "dependencies.json", JSON.stringify(dependencies, null, 2), "Update dependencies list", guildId);
 
   const pluginRecord = {
     name: pluginName,
@@ -434,12 +434,12 @@ plugin.retrieveCode = async function(pluginName, files, guildId) {
 
   pluginInfo = JSON.parse(await fs.readFile(`./db/${guildId}/plugins.json`, "utf8")).find(obj => obj.name === pluginName);
   pluginDescription = pluginInfo.description;
-  code.pluginJava = files.includes("pluginJava") ? await getFile(pluginName, `src/main/java/com/walrusmc/${pluginName}.java`, guildId) : false;
-  code.pluginYML = files.includes("pluginYML") ? await getFile(pluginName, `src/main/resources/plugin.yml`, guildId) : false;
-  code.configYML = files.includes("configYML") ? await getFile(pluginName, "src/main/resources/config.yml", guildId) : false;
+  code.pluginJava = files.includes("pluginJava") ? await github.getFile(pluginName, `src/main/java/com/walrusmc/${pluginName}.java`, guildId) : false;
+  code.pluginYML = files.includes("pluginYML") ? await github.getFile(pluginName, `src/main/resources/plugin.yml`, guildId) : false;
+  code.configYML = files.includes("configYML") ? await github.getFile(pluginName, "src/main/resources/config.yml", guildId) : false;
   let dependencies = [];
   try {
-    dependencies = JSON.parse(await getFile(pluginName, "dependencies.json", guildId));
+    dependencies = JSON.parse(await github.getFile(pluginName, "dependencies.json", guildId));
   } catch {
     dependencies = [];
   }

@@ -3,3 +3,4 @@ node_modules
 db
 src/tools/downloads
 google-key-file.json
+devVariables.js

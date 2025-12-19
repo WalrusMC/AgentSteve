@@ -306,7 +306,7 @@ export async function moderate(info, toolHistory = []) {
         return await sendMsgDiscord(args.responseText, message, args.files);
       case "editPlugin":
       case "createNewPlugin":
-        data = await coder(toolCall.name, args.pluginName, message, args.assistantMessage, args.complex ? models.coder.high.slow : models.coder.medium.slow);
+        data = await coder(toolCall.name, args.pluginName, args.assistantMessage, args.complex ? models.coder.high.slow : models.coder.medium.slow, info);
         if (data.success) {
           downloads[data.file] = "A Minecraft plugin JAR.";
           await fs.writeFile(`./db/${message.guildId}/downloads.json`, JSON.stringify(downloads, null, 2));
@@ -336,7 +336,7 @@ export async function moderate(info, toolHistory = []) {
         switch (data.data) {
           case "NO_AUTH":
           case "FORBIDDEN":
-            return false;
+            return false; // A message is sent to the user explaining how they can grant Steve access to documents.
           case "NOT_FOUND":
             toolHistory.push({
               tool: toolCall.name,
