@@ -92,7 +92,7 @@ server.addNew = async function (guildId: string, serverId: string) {
 
     // Get server type and version
     const startupVars = Object.fromEntries(
-      serverStartup.data.map((v: any) => [
+      serverStartup.data.data.map((v: any) => [
         v.attributes.env_variable,
         v.attributes.server_value
       ])
@@ -166,7 +166,7 @@ server.readAndUpdate = async function (guildId: string) {
 
     // Get server type and version
     const startupVars = Object.fromEntries(
-      serverStartup.data.map((v: any) => [
+      serverStartup.data.data.map((v: any) => [
         v.attributes.env_variable,
         v.attributes.server_value
       ])

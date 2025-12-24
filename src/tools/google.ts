@@ -9,11 +9,12 @@ const CLIENT_ID = KEY_FILE.client_id;
 const SCOPES = ["https://www.googleapis.com/auth/documents.readonly"];
 
 // Web server proxies the callback at /aiagents/steve/oauth/google/callback
-const oauth2Client = new google.auth.OAuth2(
-  CLIENT_ID,
-  CLIENT_SECRET,
-  "http://localhost:3000/aiagents/steve/oauth/google/callback"
-);
+const createOAuthClient = () =>
+  new google.auth.OAuth2(
+    CLIENT_ID,
+    CLIENT_SECRET,
+    "http://localhost:3000/aiagents/steve/oauth/google/callback"
+  );
 
 export const gdoc: any = {};
 
@@ -66,8 +67,18 @@ gdoc.read = async function(content: string | false, message: Message, ids?: stri
 
   // Get latest authorization token
   const userRecord = JSON.parse(await fs.readFile(`./db/${message.guildId}/users.json`, "utf8"))?.[message.author.id];
-  const tokens = userRecord?.tokens || userRecord?.token;
+  let tokens = userRecord?.tokens || userRecord?.token;
+  if (typeof tokens === "string") {
+    try {
+      tokens = JSON.parse(tokens);
+    } catch {
+      // Leave as string; google auth will throw a clearer error we can handle below.
+    }
+  }
 
+
+  // Create a fresh OAuth client per call to avoid cross-request credential races
+  const oauth2Client = createOAuthClient();
 
   // Create authorization URL
   const authUrl = oauth2Client.generateAuthUrl({
@@ -94,6 +105,7 @@ gdoc.read = async function(content: string | false, message: Message, ids?: stri
   const docs = google.docs({ version: "v1", auth: oauth2Client });
 
   // Get each document by the ID
+  const errors: Array<{ id: string; status?: number; message?: string; data?: unknown }> = [];
   for (const id of docIds) {
     let res: any;
     try {
@@ -102,15 +114,30 @@ gdoc.read = async function(content: string | false, message: Message, ids?: stri
         includeTabsContent: true
       });
     } catch (err) {
-      const status = (err as any)?.response?.status;
-      if (status === 401 || status === 403) {
+      const status = (err as any)?.response?.status as number | undefined;
+      const data = (err as any)?.response?.data;
+      const messageText = (err as any)?.message ? String((err as any).message) : undefined;
+
+      errors.push({ id, status, message: messageText, data });
+
+      // Token refresh failures commonly surface as 400 invalid_grant
+      const invalidGrant =
+        status === 400 &&
+        (data?.error === "invalid_grant" ||
+          data?.error?.status === "INVALID_ARGUMENT" && String(data?.error?.message || "").includes("invalid_grant") ||
+          (messageText && messageText.includes("invalid_grant")));
+
+      if (invalidGrant || status === 401 || status === 403) {
         await message.reply(`I need permission to view this document: <https://docs.google.com/document/d/${id}/>. Click [this link](<${authUrl}>) to give me permission.`);
         return {
           name: "gdoc.read",
           success: false,
-          result: "FORBIDDEN",
-          code: 403
+          result: invalidGrant ? "NO_AUTH" : "FORBIDDEN",
+          code: invalidGrant ? 401 : (status === 401 ? 401 : 403),
+          metaData: { id, status, data }
         };
+      } else if (status === 404) {
+        res = false;
       } else {
         res = false;
       }
@@ -130,8 +157,17 @@ gdoc.read = async function(content: string | false, message: Message, ids?: stri
   if (!documents?.length) return {
     name: "gdoc.read",
     success: false,
-    result: "NOT_FOUND",
-    code: 404
+    result: (() => {
+      const hasUnknown = errors.some(e => e.status == null);
+      const hasNon404 = errors.some(e => e.status && e.status !== 404 && e.status !== 401 && e.status !== 403);
+      return hasUnknown || hasNon404 ? "ERROR" : "NOT_FOUND";
+    })(),
+    code: (() => {
+      const firstNon404 = errors.find(e => e.status && e.status !== 404 && e.status !== 401 && e.status !== 403);
+      const hasUnknown = errors.some(e => e.status == null);
+      return firstNon404?.status ?? (hasUnknown ? 500 : 404);
+    })(),
+    metaData: { errors }
   };
 
   // Return the final document object

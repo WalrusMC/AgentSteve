@@ -332,7 +332,7 @@ export async function moderate(info: AgentInfo, toolHistory: ToolResult[] = []):
       case "readDoc":
         // TO DO: Add summarizer for really big documents.
         toolResult = await gdoc.read(false, message, args.ids);
-        switch (toolResult.result.status) {
+        switch (toolResult.result) {
           case "NO_AUTH":
           case "FORBIDDEN":
             return {
@@ -344,14 +344,23 @@ export async function moderate(info: AgentInfo, toolHistory: ToolResult[] = []):
             toolHistory.push({
               name: "readDoc",
               success: false,
-              result: `The requested document/documents (${args.ids}) does/do not exist.`,
+              result: `The requested document/documents (${args.ids}) could not be accessed (missing permission, or broken link).`,
               code: 404
+            });
+            return await moderate(info, toolHistory);
+          case "ERROR":
+            toolHistory.push({
+              name: "readDoc",
+              success: false,
+              result: `Failed to read the requested document/documents (${args.ids}) due to a Google API/auth error.`,
+              code: toolResult.code ?? 500,
+              metaData: toolResult.metaData
             });
             return await moderate(info, toolHistory);
           default:
             if (toolResult.success) {
               // TO DO: Improve the toolResult system (toolResult.result)
-              if (toolResult.result.size > 20000) {
+              if (toolResult.metaData.size > 20000) {
                 toolHistory.push({
                   name: "readDoc",
                   success: false,

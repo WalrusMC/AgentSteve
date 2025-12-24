@@ -186,12 +186,12 @@ client.on("messageCreate", async (message) => {
     // Documents
     // TO DO: Improve the toolResult system (toolResult.result)
     const readDocResult: ToolResult = message.content.includes("https://docs.google.com/document/d/") ? await gdoc.read(message.content, message) : { name: "readDoc", success: false, result: { status: "NO_DOCS" }, code: 204 };
-    switch (readDocResult.result.status) {
+    switch (readDocResult.result) {
       case "FORBIDDEN":
       case "NO_AUTH":
         return; // Message is sent to user on how they can authorize Steve to access Doc.
       case "NOT_FOUND":
-        readDocResult.result = "Document not found due to broken or fake link.";
+        readDocResult.result = "Document not found or inaccessible (missing permission, or broken link).";
         break;
     }
     if (readDocResult.success) {
