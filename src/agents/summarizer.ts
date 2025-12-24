@@ -3,6 +3,7 @@ import fs from "fs/promises";
 import { createLogger } from "../utils/logger.js";
 import { getPastChats } from "../utils/getPastChats.js";
 import { models } from "../models.js";
+import type { Message } from "discord.js";
 
 const client = new OpenAI;
 const log = createLogger("summarizer");
@@ -47,7 +48,7 @@ const prompts = [
  * Creates and stores a concise summary of recent channel messages to provide
  * conversational context for Steve.
  */
-export async function summarizer(message) {
+export async function summarizer(message: Message) {
   log.debug("Summarizing recent chat history");
 
   const pastChats = await getPastChats(message, 20000);
@@ -58,7 +59,7 @@ export async function summarizer(message) {
       ...prompts,
       { role: "user", content: `(PAST CHATS)\n${JSON.stringify(pastChats, null, 2)}`},
     ],
-  });
+  } as any);
 
   log.response("SUMMARIZER RESPONSE", response);
 

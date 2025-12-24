@@ -1,7 +1,7 @@
 import { server} from "../../tools/server.js";
 
 // Server Access Checker
-export async function serverAccessChecker(req, res) {
+export async function serverAccessChecker(req: any, res: any) {
   const guild = req.body?.guild;
   const serverId = req.body?.server;
 

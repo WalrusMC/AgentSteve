@@ -2,6 +2,7 @@ import { logAmount } from "../../devVariables.js";
 import path from "path";
 import { fileURLToPath } from 'url';
 import { createLogger } from "../utils/logger.js";
+import type { Message } from "discord.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -14,17 +15,18 @@ const separator = "\n"
  * Sends one or more Discord messages, splitting long content at newline boundaries
  * to respect the 2000-character limit. Optionally attaches files from downloads.
  */
-export async function sendMsgDiscord(msgToSend, initiatingMsg, files = false) {
-  const messageSections = [];
-  const sentMessages = [];
+export async function sendMsgDiscord(msgToSend: string, initiatingMsg: Message, files: string[] | false = false) {
+  const messageSections: string[] = [];
+  const sentMessages: Message[] = [];
 
-  if (!files || !files.length) files = false;
-  if (files) files.forEach((element, index) => {
-    files[index] = path.join(__dirname, "downloads", initiatingMsg.guildId, element);
-  });
+  const guildId = initiatingMsg.guildId;
+  const filePaths =
+    guildId && Array.isArray(files) && files.length
+      ? files.map((element) => path.join(__dirname, "downloads", guildId, element))
+      : undefined;
 
   // While content remains, split on the nearest newline under 2000 chars
-  while(msgToSend) {
+  while (msgToSend) {
     if (msgToSend?.length > maxLength) {
       log.debug("Splitting long message for Discord limit");
 
@@ -37,7 +39,7 @@ export async function sendMsgDiscord(msgToSend, initiatingMsg, files = false) {
     } else {
       // Push the final remaining section
       messageSections.push(msgToSend);
-      msgToSend = false;
+      msgToSend = "";
       break;
     }
 
@@ -50,7 +52,7 @@ export async function sendMsgDiscord(msgToSend, initiatingMsg, files = false) {
     sentMessages.push(await initiatingMsg.reply(messageSection));
   }
 
-  if (files) sentMessages.push(await initiatingMsg.reply({ files: files }));
+  if (filePaths) sentMessages.push(await initiatingMsg.reply({ files: filePaths }));
 
   return sentMessages;
 }

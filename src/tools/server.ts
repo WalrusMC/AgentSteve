@@ -1,5 +1,6 @@
 import "dotenv/config";
-import fs from "fs/promises";
+import fs from "fs";
+import fsp from "fs/promises";
 import axios from "axios";
 import { createLogger } from "../utils/logger.js";
 
@@ -17,13 +18,13 @@ const api = axios.create({
   },
 });
 
-export const server = {};
+export const server: any = {};
 
 /** MISC **/
 // Read accessible servers from ./db/${guildId}/servers.json
-const readServers = async (guildId) => {
+const readServers = async (guildId: string) => {
   try {
-    return JSON.parse(await fs.readFile(`./db/${guildId}/servers.json`, "utf8"));
+    return JSON.parse(await fsp.readFile(`./db/${guildId}/servers.json`, "utf8"));
   } catch {
     return {};
   }
@@ -33,18 +34,20 @@ const readServers = async (guildId) => {
  * Checks if Steve has access to a server. If Steve does not have access, tries to grant Steve access. 
  * Returns a string of one of: "NO_ACCESS" | "NO_SERVER" | "INVALID_KEY" | "500" | "UNKNOWN" | "ALREADY_ACCESSIBLE" | "NO_FILE" | "ACCESS_GRANTED" | "INTERNAL_SERVER_ERROR" | "INCORRECT_FILE"
  */
-server.addNew = async function (guildId, serverId) {
+server.addNew = async function (guildId: string, serverId: string) {
   const servers = await readServers(guildId);
   const serverIds = Object.keys(servers);
 
-  let serverDetails;
+  let serverDetails: any;
+  let serverStartup: any;
   try {
-    serverDetails = await api.get(`/servers/${serverId}`);
-  } catch (err) {
+    serverDetails = await api.get(`/servers/${serverId}/`);
+    serverStartup = await api.get(`/servers/${serverId}/startup`);
+  } catch (err: any) {
     const status = err?.response?.status;
     if (serverIds.includes(serverId)) {
       delete servers[serverId];
-      await fs.writeFile(`./db/${guildId}/servers.json`, JSON.stringify(servers, null, 2));
+      await fsp.writeFile(`./db/${guildId}/servers.json`, JSON.stringify(servers, null, 2));
     }
     switch (status) {
       case 403:
@@ -74,7 +77,7 @@ server.addNew = async function (guildId, serverId) {
     accessText = await api.get(`/servers/${serverId}/files/contents`, {
       params: { file: "/agentsteve.txt" },
     });
-  } catch (err) {
+  } catch (err: any) {
     const status = err?.response?.status;
     if (status === 404) return "NO_FILE";
     if (status === 403) return "NO_ACCESS";
@@ -84,13 +87,51 @@ server.addNew = async function (guildId, serverId) {
     return "UNKNOWN";
   }
 
-  if ((toString(accessText.data) || "").trim() === toString(guildId)) {
-    servers[serverId] = serverName;
-    await fs.writeFile(`./db/${guildId}/servers.json`, JSON.stringify(servers, null, 2));
+  // Write information to db/guildId/servers.json
+  if ((String(accessText.data) || "").trim() === String(guildId)) {
+
+    // Get server type and version
+    const startupVars = Object.fromEntries(
+      serverStartup.data.map((v: any) => [
+        v.attributes.env_variable,
+        v.attributes.server_value
+      ])
+    );
+    const serverJar = startupVars.SERVER_JARFILE ?? null;
+    const minecraftVersion =
+      startupVars.MINECRAFT_VERSION ??
+      startupVars.MC_VERSION ??
+      null;
+
+    // Add server to servers from servers.json
+    servers[serverId] = {
+      name: serverName,
+      description: serverDetails.data.attributes.description,
+      specs: {
+        memory: serverDetails.data.attributes.limits.memory,
+        disk: serverDetails.data.attributes.limits.disk,
+        cpu: serverDetails.data.attributes.limits.cpu
+      },
+      ip: serverDetails.data.attributes.relationships.allocations.data[0].ip,
+      ports: serverDetails.data.attributes.relationships.allocations.data.map((data: any) => ({
+        port: data.attributes.port,
+        notes: data.attributes.notes,
+        is_primary: data.attributes.is_default
+      })),
+      serverJar,
+      minecraftVersion
+    }
+
+    // Write to servers.json
+    await fsp.writeFile(`./db/${guildId}/servers.json`, JSON.stringify(servers, null, 2));
+
+    // Delete access file from remote server
     const data = await server.deleteFiles(guildId, serverId, "agentsteve.txt");
+
     if (data.success || data.code === 403) {
       return "ACCESS_GRANTED";
     }
+
     log.error(JSON.stringify(data, null, 2));
     return "INTERNAL_SERVER_ERROR";
   }
@@ -99,16 +140,73 @@ server.addNew = async function (guildId, serverId) {
 };
 
 // Checks if a serverId matches an accessible server
-server.check = async function (guildId, serverId) {
+server.check = async function (guildId: string, serverId: string) {
   const serverIds = Object.keys(await readServers(guildId));
   return serverIds.includes(serverId);
 };
 
+// Updates and returns servers.json
+server.readAndUpdate = async function (guildId: string) {
+  const servers = JSON.parse(await fsp.readFile(`./db/${guildId}/servers.json`, "utf8"));
+
+  for (const key of Object.keys(servers)) {
+    const serverId = key;
+
+    let serverDetails: any;
+    let serverStartup: any;
+    try {
+      serverDetails = await api.get(`/servers/${serverId}/`);
+      serverStartup = await api.get(`/servers/${serverId}/startup`);
+    } catch (err) {
+      delete servers[serverId];
+      continue;
+    }
+
+    const serverName = serverDetails?.data?.attributes?.name || servers?.[serverId]?.name || serverId;
+
+    // Get server type and version
+    const startupVars = Object.fromEntries(
+      serverStartup.data.map((v: any) => [
+        v.attributes.env_variable,
+        v.attributes.server_value
+      ])
+    );
+    const serverJar = startupVars.SERVER_JARFILE ?? null;
+    const minecraftVersion =
+      startupVars.MINECRAFT_VERSION ??
+      startupVars.MC_VERSION ??
+      null;
+
+    // Add server to servers from servers.json
+    servers[serverId] = {
+      name: serverName,
+      description: serverDetails.data.attributes.description,
+      specs: {
+        memory: serverDetails.data.attributes.limits.memory,
+        disk: serverDetails.data.attributes.limits.disk,
+        cpu: serverDetails.data.attributes.limits.cpu
+      },
+      ip: serverDetails.data.attributes.relationships.allocations.data[0].ip,
+      ports: serverDetails.data.attributes.relationships.allocations.data.map((data: any) => ({
+        port: data.attributes.port,
+        notes: data.attributes.notes,
+        is_primary: data.attributes.is_default
+      })),
+      serverJar,
+      minecraftVersion
+    }
+  };
+
+  // Write to servers.json
+  await fsp.writeFile(`./db/${guildId}/servers.json`, JSON.stringify(servers, null, 2));
+
+  return servers;
+}
 
 
 /**  FILE INTERACTION **/
 // Deletes an array of file paths.
-server.deleteFiles = async function (guildId, serverId, files) {
+server.deleteFiles = async function (guildId: string, serverId: string, files: string[] | string) {
   if (!Array.isArray(files)) files = [files];
 
   if (!(await server.check(guildId, serverId))) {
@@ -120,7 +218,7 @@ server.deleteFiles = async function (guildId, serverId, files) {
       root: "/",
       files: files,
     });
-  } catch (err) {
+  } catch (err: any) {
     const status = err?.response?.status;
     switch (status) {
       case 404:
@@ -151,14 +249,17 @@ server.deleteFiles = async function (guildId, serverId, files) {
  *   ]
  * }
  */
-server.readFiles = async function (guildId, serverId, files) {
+server.readFiles = async function (guildId: string, serverId: string, files: string[] | string) {
   if (!Array.isArray(files)) files = [files];
 
   if (!(await server.check(guildId, serverId))) {
     return { success: false, result: "The target server does not exist or you do not have access to it.", code: 401 };
   }
 
-  const data = {
+  const data: {
+    success: boolean;
+    result: Array<{ success: boolean; path: string; contents: unknown; code: number }>;
+  } = {
     success: true,
     result: []
   };
@@ -187,7 +288,7 @@ server.readFiles = async function (guildId, serverId, files) {
  *   code: integer
  * }
  */
-server.readFile = async function (serverId, file) {
+server.readFile = async function (serverId: string, file: string) {
   let response;
   try {
     response = await api.post(`/servers/${serverId}/files/contents`, {
@@ -195,7 +296,7 @@ server.readFile = async function (serverId, file) {
         file: file
       }
     });
-  } catch (err) {
+  } catch (err: any) {
     const status = err?.response?.status;
     switch (status) {
       case 404:
@@ -213,7 +314,7 @@ server.readFile = async function (serverId, file) {
 }
 
 // Takes in a file path and content and writes a file to the specified path
-server.writeFile = async function (guildId, serverId, file, content) {
+server.writeFile = async function (guildId: string, serverId: string, file: string, content: unknown) {
 
   if (!(await server.check(guildId, serverId))) {
     return { success: false, result: "The target server does not exist or you do not have access to it.", code: 401 };
@@ -225,11 +326,11 @@ server.writeFile = async function (guildId, serverId, file, content) {
         file: file
       }
     });
-  } catch (err) {
+  } catch (err: any) {
     const status = err?.response?.status;
     switch (status) {
       case 404:
-        return { success: false, result: "The target directory does not exist or an internal error occured.", code: 404 };
+        return { success: false, result: "The target server or directory does not exist or an internal error occured.", code: 404 };
       case 403:
         return { success: false, result: "You do not have permission: file.write.", code: 403 };
       case 500:
@@ -243,7 +344,7 @@ server.writeFile = async function (guildId, serverId, file, content) {
 }
 
 // Uploads sourceFile to targetPath
-server.uploadFile = async function (guildId, serverId, sourceFile, targetPath) {
+server.uploadFile = async function (guildId: string, serverId: string, sourceFile: string, targetPath: string) {
   if (!(await server.check(guildId, serverId))) {
     return { success: false, result: "The target server does not exist or you do not have access to it.", code: 401 };
   }
@@ -261,15 +362,14 @@ server.uploadFile = async function (guildId, serverId, sourceFile, targetPath) {
   const signedUrl = uploadUrlResponse.data.attributes.url;
 
   // Upload file to signed URL
-  const formData = new FormData();
+  const formData: any = new (FormData as any)();
   formData.append('files', await fs.createReadStream(`./src/tools/downloads/${guildId}/${sourceFile}`));
   formData.append('directory', targetPath);
 
   try {
-    const response = await axios.post(signedUrl, formData, {
-      headers: formData.getHeaders()
-    });
-  } catch (err) {
+    const headers = typeof formData.getHeaders === "function" ? formData.getHeaders() : {};
+    await axios.post(signedUrl, formData, { headers });
+  } catch (err: any) {
     const status = err?.response?.status;
     switch (status) {
       case 404:
@@ -288,7 +388,7 @@ server.uploadFile = async function (guildId, serverId, sourceFile, targetPath) {
 }
 
 // Downloads file
-server.downloadFile = async function (guildId, serverId, file) {
+server.downloadFile = async function (guildId: string, serverId: string, file: string) {
   if (!(await server.check(guildId, serverId))) {
     return { success: false, result: "The target server does not exist or you do not have access to it.", code: 401 };
   }
@@ -301,7 +401,7 @@ server.downloadFile = async function (guildId, serverId, file) {
       },
       responseType: "stream"
     });
-  } catch (err) {
+  } catch (err: any) {
     const status = err?.response?.status;
     switch (status) {
       case 404:
@@ -315,7 +415,7 @@ server.downloadFile = async function (guildId, serverId, file) {
     }
   }
 
-  function removePath(str) {
+  function removePath(str: string) {
     const lastIndex = str.lastIndexOf("/");
 
     // Check if there is path
@@ -328,7 +428,7 @@ server.downloadFile = async function (guildId, serverId, file) {
   }
 
   try {
-    response.data.pipe(await fs.createWriteStream(`./src/tools/downloads/${guildId}/${removePath(file)}`));
+    response.data.pipe(fs.createWriteStream(`./src/tools/downloads/${guildId}/${removePath(file)}`));
   } catch {
     return { success: false, result: `An internal error occured while trying to download the target file, ${file}.`, code: 500 }
   }

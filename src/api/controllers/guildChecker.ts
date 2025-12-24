@@ -1,7 +1,7 @@
 import fs from "fs";
 import { readFile } from "fs/promises";
 
-let guilds = [];
+let guilds: string[] = [];
 
 const loadGuilds = async () => {
   try {
@@ -20,12 +20,13 @@ try {
     await loadGuilds();
   });
 } catch (err) {
-  console.warn("Failed to watch guilds.json:", err?.message || err);
+  const message = err instanceof Error ? err.message : String(err);
+  console.warn("Failed to watch guilds.json:", message);
 }
 
 // Valid Guild Checker
-export async function guildChecker(req, res) {
-  const guild = req.query?.guild;
+export async function guildChecker(req: any, res: any) {
+  const guild = req.query?.guild as string | undefined;
   if (guild && guilds.includes(guild)) {
     res.status(200).json({ result: true });
   } else {

@@ -5,15 +5,15 @@ import path from "path";
  * Make sure every per-guild datastore exists before we try to read it.
  * This prevents the responder/router pipeline from crashing on first run.
  */
-export async function ensureDBs(guildId) {
+export async function ensureDBs(guildId: string) {
   const guildDbDir = path.join("db", guildId);
   const downloadsDir = path.join("src", "tools", "downloads", guildId);
 
-  const ensureDir = async (dir) => {
+  const ensureDir = async (dir: string) => {
     await fs.mkdir(dir, { recursive: true });
   };
 
-  const ensureFile = async (filePath, defaultContent) => {
+  const ensureFile = async (filePath: string, defaultContent: string) => {
     try {
       await fs.access(filePath);
     } catch {

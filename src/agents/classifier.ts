@@ -1,17 +1,18 @@
 import OpenAI from "openai";
 import { getPastChats } from "../utils/getPastChats.js";
 import { models } from "../models.js";
+import type { Message } from "discord.js";
 
 const client = new OpenAI();
 
-export async function classifier(message) {
+export async function classifier(message: Message) {
 
   // pastChats
-  const pastChats = getPastChats(message, 700);
+  const pastChats = await getPastChats(message, 700);
 
   // currentUserMessage
   const attachmentNames = message?.attachments?.size 
-  ? message.attachments.map(att => att.name)
+  ? message.attachments.map(att => att.name ?? "UNKNOWN_ATTACHMENT")
   : [];
   const currentUserMessage = {
     time: message.createdAt.toISOString(),
@@ -52,6 +53,9 @@ export async function classifier(message) {
             "needs_server_action": { "type": "boolean" },
             "needs_recent_data": { "type": "boolean" },
             "needs_structured_planning": { "type": "boolean" },
+            "needs_to_browse_web": { "type": "boolean" },
+            "needs_document_access": { "type": "boolean" },
+
 
             "needs_multiple_server_actions": { 
               "type": "boolean",
@@ -65,6 +69,8 @@ export async function classifier(message) {
             "needs_server_action",
             "needs_recent_data",
             "needs_structured_planning",
+            "needs_to_browse_web",
+            "needs_document_access",
             "needs_multiple_server_actions",
             "needs_code_execution_or_debugging_or_testing",
             "needs_large_workflow"

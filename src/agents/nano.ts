@@ -4,6 +4,7 @@ import { sendMsgDiscord } from "../tools/sendMsgDiscord.js";
 import { createLogger } from "../utils/logger.js";
 import { moderate } from "./moderate.js";
 import { models } from "../models.js";
+import type { AgentInfo, ResponderResponse, ToolResult } from "../types.js";
 
 const client = new OpenAI;
 const log = createLogger("nano");
@@ -24,7 +25,7 @@ const developerPrompt = `You are the nano responder for Steve, part of a multi-m
 
 Your job is to do one of the following:
 Respond to the currentUserMessage yourself via the respond() tool.
-OR, if the user is asking for something that Steve (as the whole multi-model AI system) can do, but you (as the nano responder) can not do
+OR, if the user is asking for something that Steve (as the whole multi-model AI system) can do, but you (as the nano responder) can not do:
 Forward the user request to the moderate responder via moderate().
 
 What the full Steve system CAN DO (through the other models):
@@ -40,6 +41,10 @@ What YOU (the nano responder) can do:
 Never respond yourself IF: 
 - If the user request requires real-time or outside information.
 - The user request is asking you to do something other than respond with plain text and/or files.
+
+Before responding yourself, ALWAYS ask yourself this:
+Do I need more information to accurately answer the user request?
+If yes, do NOT respond yourself, and instead call the moderate() tool.
 
 Output rules:  
 - You MUST call exactly ONE tool: respond() or moderate().  
@@ -57,19 +62,19 @@ Output rules:
  * - Uses gpt-5-nano as a lightweight reasoning controller and responder to either forward
  *   to the moderate responder or answer directly when trivial.
  */
-export async function nano(info) {
-  const { message } = info; // {Object}
-  const { pastChats } = info; // [Array]
-  const { summary } = info; // "String"
-  const files = JSON.parse(await fs.readFile(`./db/${message.guildId}/files.json`, "utf-8")); // {Object}
-  const plugins = await fs.readFile(`./db/${message.guildId}/plugins.json`, "utf-8"); // [Array]
+export async function nano(info: AgentInfo, toolHistory: ToolResult[]): Promise<ResponderResponse> {
+  const { message } = info;
+  const { pastChats } = info;
+  //const { summary } = info; // "String"
+  const downloads: Record<string, string> = JSON.parse(await fs.readFile(`./db/${message.guildId}/downloads.json`, "utf-8"));
+  const plugins: string = await fs.readFile(`./db/${message.guildId}/plugins.json`, "utf-8");
   
   log.debug("Nano responder started for message", message.id);
 
 
   // Current User Message
   const attachmentNames = message?.attachments?.size
-  ? message.attachments.map(att => att.name)
+  ? message.attachments.map(att => att.name ?? "UNKNOWN_ATTACHMENT")
   : [];
   const currentUserMessage = {
     time: message.createdAt.toISOString(),
@@ -94,14 +99,14 @@ export async function nano(info) {
         description: "Plugins the full Steve has access to (through other models).",
         content: plugins
       },
-      files: {
+      downloads: {
         description: "Downloaded files Steve and you (the nano responder) have access to.",
-        content: files
+        content: downloads
       }
     }
   }, null, 2);
   const assistantInput = JSON.stringify({
-    memorySummary: summary
+    memorySummary: "NO memory summary right now! Currently being implemented by developers."//summary
   }, null, 2);
 
 
@@ -122,7 +127,7 @@ export async function nano(info) {
             description: "Optional. An array of any files that need to be sent to the user.",
             items: { 
               type: "string",
-              enum: Object.keys(files),
+              enum: Object.keys(downloads),
               description: "The name of the file you wish to send."
             },
           },
@@ -139,7 +144,7 @@ export async function nano(info) {
 
   // Send initial route decision request to OpenAI
   log.debug(`Sending request to ${models.general.low.slow}`);
-  log.response("OPENAI INPUT (NANO)", `|SYSTEM|\n${systemPrompt}\n|DEVELOPER|\n${devInput}\n|USER|\n${userInput}\n|ASSISTANT|\n${summary}`);
+  log.response("OPENAI INPUT (NANO)", `|SYSTEM|\n${systemPrompt}\n|DEVELOPER|\n${devInput}\n|USER|\n${userInput}\n|ASSISTANT|\n${assistantInput}`);
   const response = await client.responses.create({
     model: models.general.low.slow,
     input: [
@@ -149,38 +154,54 @@ export async function nano(info) {
       { role: "assistant", content: assistantInput },
     ],
     tools: tools
-  });
+  } as any);
   log.response("NANO RESPONSE", response);
 
   // Call tools
-  const toolCall = response?.output?.find?.(c => c.type === "function_call" || c.type === "tool_call");
-  const responseText = response?.output?.[1]?.content?.[0]?.text;
+  const toolCall = (response as any)?.output?.find?.((c: any) => c.type === "function_call" || c.type === "tool_call");
+  const responseText = (response as any)?.output?.[1]?.content?.[0]?.text;
   if (toolCall) {
     const args = JSON.parse(toolCall.arguments);
     switch (toolCall.name) {
       case "respond":
         log.debug("The nano responder chose to respond itself.");
-        return await sendMsgDiscord(args.responseText, message, args.files);
+        return {
+          messages: await sendMsgDiscord(args.responseText, message, args.files),
+          isClarification: false,
+          responder: "nano"
+        };
       case "moderate":
         log.debug("The nano responder decided to forward the message.");
-        return await moderate(info);
+        return await moderate(info, toolHistory);
       default:
         log.error("The nano responder did not call a valid tool.")
-        return await sendMsgDiscord("Oh no! An error has occured.", message);
+        return {
+          messages: await sendMsgDiscord("Oh no! An error has occured.", message),
+          isClarification: false,
+          responder: "nano"
+        };
     }
   } else if (responseText) {
     switch (responseText) {
       case "moderate()":
       case "moderate":
         log.warn("The nano responder returned output text and decided to forward the message.");
-        return await moderate(info);
+        return await moderate(info, toolHistory);
       default:
         log.error("The nano responder returned output text. Aborting.");
-        return await sendMsgDiscord("Oh no! An error has occured.", message);
+        return {
+          messages: await sendMsgDiscord("Oh no! An error has occured.", message),
+          isClarification: false,
+          responder: "nano"
+        };
     }
   } else {
     log.error("The nano responder did not call a tool or return output text.");
-    return await sendMsgDiscord("Oh no! An error has occured.", message);
+    return {
+      messages: await sendMsgDiscord("Oh no! An error has occured.", message),
+      isClarification: false,
+      responder: "nano"
+    };
   }
 
 };

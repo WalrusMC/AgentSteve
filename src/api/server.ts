@@ -15,7 +15,7 @@ app.use("/", auth);
 
 app.use("/internal/aiagents/steve", router);
 
-app.use("/", (req, res) => {
+app.use("/", (_req: any, res: any) => {
   res.status(404);
 })
 

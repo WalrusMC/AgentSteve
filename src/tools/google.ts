@@ -1,7 +1,9 @@
 import { google } from "googleapis";
 import fs from "fs/promises";
+import type { Message } from "discord.js";
+import type { ToolResult } from "../types.js";
 
-const KEY_FILE = JSON.parse(await fs.readFile("./google-key-file.json")).web;
+const KEY_FILE = JSON.parse(await fs.readFile("./google-key-file.json", "utf8")).web;
 const CLIENT_SECRET = KEY_FILE.client_secret;
 const CLIENT_ID = KEY_FILE.client_id;
 const SCOPES = ["https://www.googleapis.com/auth/documents.readonly"];
@@ -13,7 +15,7 @@ const oauth2Client = new google.auth.OAuth2(
   "http://localhost:3000/aiagents/steve/oauth/google/callback"
 );
 
-export const gdoc = {};
+export const gdoc: any = {};
 
 /** Extracts different document tabs out of a document and returns:
  * [
@@ -24,19 +26,19 @@ export const gdoc = {};
  *  }
  * ]
 */
-gdoc.getTabs = function(tabs) {
-  const tabArray = [];
-  tabs.forEach(obj => {
+gdoc.getTabs = function(tabs: any[]) {
+  const tabArray: Array<{ title: string; content: string; subTabs: unknown[] }> = [];
+  (tabs || []).forEach((obj: any) => {
     let content = "";
 
-    obj?.documentTab?.body?.content?.forEach?.(obj => {
-      obj?.paragraph?.elements?.forEach?.(obj => {
-        content += obj?.textRun?.content;
+    obj?.documentTab?.body?.content?.forEach?.((contentObj: any) => {
+      contentObj?.paragraph?.elements?.forEach?.((elementObj: any) => {
+        content += elementObj?.textRun?.content;
       });
     })
 
     tabArray.push({
-      title: obj.tabProperties.title,
+      title: obj?.tabProperties?.title ?? "Untitled",
       content: content,
       subTabs: obj?.childTabs?.length ? gdoc.getTabs(obj.childTabs) : []
     })
@@ -46,7 +48,7 @@ gdoc.getTabs = function(tabs) {
 }
 
 // Entry point for extracting documents from a message
-gdoc.read = async function(content, message, ids) {
+gdoc.read = async function(content: string | false, message: Message, ids?: string[]): Promise<ToolResult> {
 
   // Extract IDs or use given IDs
   const docIds = content ? gdoc.extractIds(content) : ids;
@@ -56,12 +58,14 @@ gdoc.read = async function(content, message, ids) {
 
   // Exit function if no doc ids were found
   if (!docIds?.length) return {
+    name: "gdoc.read",
     success: false,
-    data: "NO_DOCS"
+    result: "NO_DOCS",
+    code: 204
   };
 
   // Get latest authorization token
-  const userRecord = JSON.parse(await fs.readFile(`./db/${message.guildId}/users.json`))?.[message.author.id];
+  const userRecord = JSON.parse(await fs.readFile(`./db/${message.guildId}/users.json`, "utf8"))?.[message.author.id];
   const tokens = userRecord?.tokens || userRecord?.token;
 
 
@@ -77,8 +81,10 @@ gdoc.read = async function(content, message, ids) {
   if (!tokens) {
     await message.reply(`I need permission to view that document. Click [this link](<${authUrl}>) to give me permission.`);
     return {
+      name: "gdoc.read",
       success: false,
-      data: "NO_AUTH"
+      result: "NO_AUTH",
+      code: 401
     };
   }
 
@@ -89,18 +95,21 @@ gdoc.read = async function(content, message, ids) {
 
   // Get each document by the ID
   for (const id of docIds) {
-    let res;
+    let res: any;
     try {
       res = await docs.documents.get({
         documentId: id,
         includeTabsContent: true
       });
     } catch (err) {
-      if (err.response.status === 401 || err.response.status === 403) {
+      const status = (err as any)?.response?.status;
+      if (status === 401 || status === 403) {
         await message.reply(`I need permission to view this document: <https://docs.google.com/document/d/${id}/>. Click [this link](<${authUrl}>) to give me permission.`);
         return {
+          name: "gdoc.read",
           success: false,
-          data: "FORBIDDEN"
+          result: "FORBIDDEN",
+          code: 403
         };
       } else {
         res = false;
@@ -119,26 +128,30 @@ gdoc.read = async function(content, message, ids) {
 
   // If no documents could be retrieved, exit the function
   if (!documents?.length) return {
+    name: "gdoc.read",
     success: false,
-    data: "NOT_FOUND"
+    result: "NOT_FOUND",
+    code: 404
   };
 
   // Return the final document object
   return {
+    name: "gdoc.read",
     success: true,
-    data: documents,
-    size: JSON.stringify(documents).length
+    result: documents,
+    code: 200,
+    metaData: { size: JSON.stringify(documents).length }
   };
 
 }
 
 // Extracts document IDs from a message if they exist
-gdoc.extractIds = function(content) {
-  const docIds = [];
+gdoc.extractIds = function(content: string) {
+  const docIds: string[] = [];
   const ids = content.split("https://docs.google.com/document/d/");
   if (!ids?.length) return [];
   ids.shift();
-  ids.forEach(str => {
+  ids.forEach((str: string) => {
     const spaceIndex = str.indexOf(" ") !== -1 ? str.indexOf(" ") : NaN;
     const slashIndex = str.indexOf("/") !== -1 ? str.indexOf("/") : NaN;
     if (spaceIndex || slashIndex) {

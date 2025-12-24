@@ -1,8 +1,8 @@
 import OpenAI from "openai"
 import { createLogger } from "../utils/logger.js";
-import { getPastChats } from "../utils/getPastChats.js";
 import { plugin } from "../tools/plugin.js";
 import { models } from "../models.js";
+import type { AgentInfo, ToolResult } from "../types.js";
 
 const client = new OpenAI;
 const log = createLogger("coder");
@@ -25,9 +25,20 @@ ONLY return a tool call.`;
  * job = createNewPlugin, editPlugin, fixCrash
  */
 
-export async function coder(job, pluginName, assistantMessage, model, info, data) {
+type CoderJob = "createNewPlugin" | "editPlugin" | "fixCrash";
+
+export async function coder(
+  job: CoderJob,
+  pluginName: string,
+  assistantMessage: string,
+  model: string,
+  info: AgentInfo,
+  data?: string,
+): Promise<ToolResult> {
   const { message } = info;
   const { pastChats } = info;
+  const guildId = message.guildId;
+  if (!guildId) throw new Error("Missing guildId on coder message");
   const toolsArray = [
     { 
       type: "function",
@@ -135,8 +146,13 @@ export async function coder(job, pluginName, assistantMessage, model, info, data
       },
   ];
 
-  let developerPrompt;
-  let tool;
+  let developerPrompt: string;
+  let tool: {
+    type: string,
+    name: string,
+    description: string,
+    parameters: object
+  };
   switch (job) {
     case "createNewPlugin":
       developerPrompt = `Your job is to create a new Paper 1.20.1 Minecraft plugin called ${pluginName} from the user prompt by calling 
@@ -145,7 +161,7 @@ export async function coder(job, pluginName, assistantMessage, model, info, data
       tool = toolsArray[0];
       break;
     case "editPlugin":
-      data = await plugin.retrieveCode(pluginName, ["pluginJava", "pluginYML", "configYML"], message.guildId);
+      data = await plugin.retrieveCode(pluginName, ["pluginJava", "pluginYML", "configYML"], guildId).result;
       developerPrompt = `Your job is to edit a Paper 1.20.1 Minecraft plugin called ${pluginName} to fufill the user request by calling 
       using the **editPlugin** tool. You may use your assistant message to understand the user intent and your past chats to 
       understand the context of the current user message.
@@ -172,6 +188,10 @@ export async function coder(job, pluginName, assistantMessage, model, info, data
       break;
   }
 
+  if (!developerPrompt || !tool) {
+    throw new Error(`Invalid coder job: ${job}`);
+  }
+
   // Tools
   const tools = [
     { type: "web_search" },
@@ -180,7 +200,7 @@ export async function coder(job, pluginName, assistantMessage, model, info, data
 
   // User input and past chats
   const attachmentNames = message?.attachments?.size 
-  ? Array.from(message.attachments.values()).map(a => a.name).join(",")
+  ? Array.from(message.attachments.values()).map(a => a.name ?? "").filter(Boolean).join(",")
   : "";
   const userInput = `(PAST CHATS)\n${pastChats}\n(CURRENT USER MESSAGE)UTC_TIME:${message.createdAt.toISOString()}|ROLE:ADMINISTRATOR|USERNMAME:${message.author.username}|USER_ID:${message.author.id}|CHAT:${message.content}${attachmentNames ? `|ATTACHMENTS:${attachmentNames}` : ""}\n`;
 
@@ -195,41 +215,47 @@ export async function coder(job, pluginName, assistantMessage, model, info, data
       { role: "assistant", content: JSON.stringify(assistantMessage, null, 2) },
     ],
     tools: tools
-  });
+  } as any);
   log.response("CODER RESPONSE", response);
 
   // Call tools
-  const toolCall = response.output.find?.(c => c.type === "function_call" || c.type === "tool_call");
+  const toolCall = (response as any).output.find?.((c: any) => c.type === "function_call" || c.type === "tool_call");
   if (toolCall) {
     const args = JSON.parse(toolCall.arguments);
-    let data;
+    let toolResult: ToolResult;
     switch (toolCall.name) {
       case "createNewPlugin":
-        data = await plugin.createNew(pluginName, args.pluginDescription, args.pluginJava, args.pluginYML, args?.configYML, args?.dependencies, message.guildId);
-        if (data.success) {
-          return data;
+        toolResult = await plugin.createNew(pluginName, args.pluginDescription, args.pluginJava, args.pluginYML, args?.configYML, args?.dependencies, guildId);
+        if (toolResult.success || toolResult.code === 409) {
+          return toolResult; // Success || Plugin with name already exists
         } else {
-          return coder("fixCrash", pluginName, assistantMessage, models.coder.high.slow, info, plugin.crashReport(pluginName, data.version, data.code, data.error), );
+          // TO DO: Improve the toolResult system (toolResult.result)
+          return coder("fixCrash", pluginName, assistantMessage, models.coder.high.slow, info, await plugin.crashReport(pluginName, toolResult.result.version, toolResult.result.code, toolResult.result.error, guildId).result);
         }
       case "editPlugin":
-        data = await plugin.edit(pluginName, args?.pluginDescription, args?.deletions, args?.insertions, args?.addDependencies, args?.removeDependencies, message.guildId);
-        if (data.success) {
-          return data;
+        toolResult = await plugin.edit(pluginName, args?.pluginDescription, args?.deletions, args?.insertions, args?.addDependencies, args?.removeDependencies, guildId);
+        if (toolResult.success) {
+          return toolResult;
         } else {
-          return coder("fixCrash", pluginName, message, assistantMessage, models.coder.high.slow, info, plugin.crashReport(pluginName, data.version, data.code, data.error));
+          // TO DO: Improve the toolResult system (toolResult.result)
+          return coder("fixCrash", pluginName, assistantMessage, models.coder.high.slow, info, await plugin.crashReport(pluginName, toolResult.result.version, toolResult.result.code, toolResult.result.error, guildId).result);
         }
       default:
         log.error("GPT did not call a valid tool.");
         return {
+          name: job,
           success: false,
-          error: "An internal error has occurred.",
+          result: "An internal error has occurred.",
+          code: 500
         };
     }
   } else {
     log.error("GPT did not call a tool.");
     return {
+      name: job,
       success: false,
-      error: "An internal error has occurred.",
+      result: "An internal error has occurred.",
+      code: 500
     };
   }
 
