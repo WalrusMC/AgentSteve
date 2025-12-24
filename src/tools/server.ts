@@ -1,5 +1,5 @@
 import "dotenv/config";
-import fs from "fs";
+import fs from "fs/promises";
 import fsp from "fs/promises";
 import axios from "axios";
 import { createLogger } from "../utils/logger.js";
@@ -171,6 +171,7 @@ server.readAndUpdate = async function (guildId: string) {
         v.attributes.server_value
       ])
     );
+    await fs.writeFile(`./info_logs/startupVars.json`, JSON.stringify(serverStartup.data.data, null, 2));
     const serverJar = startupVars.SERVER_JARFILE ?? null;
     const minecraftVersion =
       startupVars.MINECRAFT_VERSION ??
@@ -192,9 +193,10 @@ server.readAndUpdate = async function (guildId: string) {
         notes: data.attributes.notes,
         is_primary: data.attributes.is_default
       })),
-      serverJar,
-      minecraftVersion
+      serverJar, // Change
+      minecraftVersion // Change
     }
+    // How we get version and server software type must be redesigned as those egg env vars do not exist. We must read the server.jar to figure out version and type
   };
 
   // Write to servers.json
@@ -363,7 +365,7 @@ server.uploadFile = async function (guildId: string, serverId: string, sourceFil
 
   // Upload file to signed URL
   const formData: any = new (FormData as any)();
-  formData.append('files', await fs.createReadStream(`./src/tools/downloads/${guildId}/${sourceFile}`));
+  //formData.append('files', await fs.createReadStream(`./src/tools/downloads/${guildId}/${sourceFile}`));
   formData.append('directory', targetPath);
 
   try {
@@ -428,7 +430,7 @@ server.downloadFile = async function (guildId: string, serverId: string, file: s
   }
 
   try {
-    response.data.pipe(fs.createWriteStream(`./src/tools/downloads/${guildId}/${removePath(file)}`));
+    //response.data.pipe(fs.createWriteStream(`./src/tools/downloads/${guildId}/${removePath(file)}`));
   } catch {
     return { success: false, result: `An internal error occured while trying to download the target file, ${file}.`, code: 500 }
   }
