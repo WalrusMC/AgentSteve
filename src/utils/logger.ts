@@ -12,12 +12,12 @@ export function createLogger(scope = "app") {
   const shouldDebug = () => logAmount >= 2;
 
   return {
-    info: (...args) => { if (shouldInfo()) console.log("INFO", label, ...args); },
-    debug: (...args) => { if (shouldDebug()) console.log("DEBUG", label, ...args); },
-    warn: (...args) => console.warn("WARN", label, ...args),
-    error: (...args) => console.error("ERROR", label, ...args),
+    info: (...args: unknown[]) => { if (shouldInfo()) console.log("INFO", label, ...args); },
+    debug: (...args: unknown[]) => { if (shouldDebug()) console.log("DEBUG", label, ...args); },
+    warn: (...args: unknown[]) => console.warn("WARN", label, ...args),
+    error: (...args: unknown[]) => console.error("ERROR", label, ...args),
     // For large model responses or payloads, controlled by logResponse and logAmount > 0
-    response: (title, payload) => {
+    response: (title: string, payload: unknown) => {
       if (logResponse && logAmount) {
         try {
           const pretty = typeof payload === "string" ? payload : JSON.stringify(payload, null, 2);
@@ -29,4 +29,3 @@ export function createLogger(scope = "app") {
     },
   };
 }
-

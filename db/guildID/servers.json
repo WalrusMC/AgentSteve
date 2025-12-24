@@ -1,0 +1,19 @@
+{
+  "serverId": {
+    "name": "string",
+    "description": "string",
+    "specs": {
+      "memory": "integer",
+      "disk": "integer",
+      "cpu": "integer"
+    },
+    "ip": "integer",
+    "ports": [{
+      "port": "integer",
+      "notes": "string",
+      "is_primary": "boolean"
+    }],
+    "serverJar": "string",
+    "minecraftVersion": "string"
+  }
+}

@@ -5,15 +5,15 @@ import path from "path";
  * Make sure every per-guild datastore exists before we try to read it.
  * This prevents the responder/router pipeline from crashing on first run.
  */
-export async function ensureDBs(guildId) {
+export async function ensureDBs(guildId: string) {
   const guildDbDir = path.join("db", guildId);
-  const storedFilesDir = path.join("src", "tools", "storedFiles", guildId);
+  const downloadsDir = path.join("src", "tools", "downloads", guildId);
 
-  const ensureDir = async (dir) => {
+  const ensureDir = async (dir: string) => {
     await fs.mkdir(dir, { recursive: true });
   };
 
-  const ensureFile = async (filePath, defaultContent) => {
+  const ensureFile = async (filePath: string, defaultContent: string) => {
     try {
       await fs.access(filePath);
     } catch {
@@ -22,9 +22,10 @@ export async function ensureDBs(guildId) {
   };
 
   await ensureDir(guildDbDir);
-  await ensureDir(storedFilesDir);
+  await ensureDir(downloadsDir);
 
-  await ensureFile(path.join(guildDbDir, "files.json"), "{}");
+  await ensureFile(path.join(guildDbDir, "servers.json"), "{}")
+  await ensureFile(path.join(guildDbDir, "downloads.json"), "{}");
   await ensureFile(path.join(guildDbDir, "summaries.json"), "{}");
   await ensureFile(path.join(guildDbDir, "whitelist.json"), JSON.stringify({ users: [], roles: [] }, null, 2));
   await ensureFile(path.join(guildDbDir, "plugins.json"), "[]");

@@ -4,7 +4,9 @@ import fs from "fs/promises";
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { createLogger } from "../utils/logger.js";
-import { createRepo, writeFile, getFile } from "../utils/github.js";
+import { github } from "../utils/github.js";
+
+import type { ToolResult } from "../types.ts";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -12,9 +14,9 @@ const log = createLogger("plugin");
 
 const run = promisify(exec);
 
-export const plugin = {};
+export const plugin: any = {};
 
-const bumpPatchVersion = (version = "1.0.0") => {
+const bumpPatchVersion = (version: string = "1.0.0") => {
   const parts = `${version}`.split(".").map(part => Number.parseInt(part, 10) || 0);
   while (parts.length < 3) parts.push(0);
   parts[parts.length - 1] += 1;
@@ -24,16 +26,24 @@ const bumpPatchVersion = (version = "1.0.0") => {
 /**
  * Apply the requested deletions/insertions to a text file.
  */
-const applyTextChanges = (content, fileKey, deletions = [], insertions = []) => {
+type CodeDeletion = { file: string; startLine: number | string; endLine: number | string };
+type CodeInsertion = { file: string; startLine: number | string; content: string };
+
+const applyTextChanges = (
+  content: string,
+  fileKey: string,
+  deletions: CodeDeletion[] = [],
+  insertions: CodeInsertion[] = [],
+) => {
   if (!content?.length) return content;
   const lines = content.split("\n");
 
   deletions
     .filter(entry => entry?.file === fileKey)
-    .sort((a, b) => (Number.parseInt(b.startLine, 10) || 0) - (Number.parseInt(a.startLine, 10) || 0))
+    .sort((a, b) => (Number.parseInt(String(b.startLine), 10) || 0) - (Number.parseInt(String(a.startLine), 10) || 0))
     .forEach(({ startLine, endLine }) => {
-      const startLineValue = Number.parseInt(startLine, 10) || 1;
-      const endLineValueRaw = Number.parseInt(endLine, 10);
+      const startLineValue = Number.parseInt(String(startLine), 10) || 1;
+      const endLineValueRaw = Number.parseInt(String(endLine), 10);
       const endLineValue = Number.isFinite(endLineValueRaw) ? Math.max(startLineValue, endLineValueRaw) : startLineValue;
       const startIdx = Math.max(0, startLineValue - 1);
       const deleteCount = Math.max(0, endLineValue - startLineValue + 1);
@@ -42,10 +52,10 @@ const applyTextChanges = (content, fileKey, deletions = [], insertions = []) => 
 
   insertions
     .filter(entry => entry?.file === fileKey)
-    .sort((a, b) => (Number.parseInt(a.startLine, 10) || 0) - (Number.parseInt(b.startLine, 10) || 0))
+    .sort((a, b) => (Number.parseInt(String(a.startLine), 10) || 0) - (Number.parseInt(String(b.startLine), 10) || 0))
     .forEach(({ startLine, content: insertionContent }) => {
       if (typeof insertionContent !== "string") return;
-      const insertionLineValue = Number.parseInt(startLine, 10);
+      const insertionLineValue = Number.parseInt(String(startLine), 10);
       const insertionIdx = Math.max(0, Math.min(lines.length, Number.isFinite(insertionLineValue) ? insertionLineValue : 0));
       const insertionLines = insertionContent.split("\n");
       lines.splice(insertionIdx, 0, ...insertionLines);
@@ -61,7 +71,16 @@ const applyTextChanges = (content, fileKey, deletions = [], insertions = []) => 
  *  error: undefined/errorreport
  * }
  */
-async function buildJAR(pluginName, pluginVersion, pluginJava, pluginYML, configYML, pomXML, guildId, dependencies = []) {
+async function buildJAR(
+  pluginName: string,
+  pluginVersion: string,
+  pluginJava: string,
+  pluginYML: string,
+  configYML: string,
+  pomXML: string,
+  guildId: string,
+  dependencies: string[] = [],
+): Promise<ToolResult> {
   const dependenciesArray = [ 
     {
       dependency: 1, 
@@ -96,10 +115,10 @@ async function buildJAR(pluginName, pluginVersion, pluginJava, pluginYML, config
 
 // Generate temp build directory structure and build the jar
   const builderRoot = path.join(__dirname, "pluginBuilder", guildId);
-  const javaDir = path.join(builderRoot, "src", "main", "java", "com", "agentsteveofficial");
+  const javaDir = path.join(builderRoot, "src", "main", "java", "com", "walrusmc");
   const resourcesDir = path.join(builderRoot, "src", "main", "resources");
   const pomPath = path.join(builderRoot, "pom.xml");
-  const storedGuildDir = path.join(__dirname, "storedFiles", guildId);
+  const storedGuildDir = path.join(__dirname, "downloads", guildId);
   const jarOutputName = `${pluginName}-${pluginVersion}.jar`;
 
   try {
@@ -128,22 +147,29 @@ async function buildJAR(pluginName, pluginVersion, pluginJava, pluginYML, config
 
     log.info(`Built plugin JAR: ${jarOutputName}`);
     return { 
+      name: "buildJAR",
       success: true,
-      file: jarOutputName,
+      result: jarOutputName,
+      code: 200
     };
-  } catch (err) {
-    log.error("Maven build failed:", err?.stderr || err?.stdout || err?.message || err);
+  } catch (err: unknown) {
+    const error = err as any;
+    log.error("Maven build failed:", error?.stderr || error?.stdout || error?.message || error);
     return {
+      name: "buildJAR",
       success: false,
-      error: err.stderr || err.stdout || err.message,
-      pluginName: pluginName,
-      version: pluginVersion,
-      code: {
-        pluginJava: pluginJava,
-        pljuginYML: pluginYML,
-        configYML: configYML,
-        dependencies: dependenciesArray
+      result: {
+        error: error?.stderr || error?.stdout || error?.message,
+        pluginName: pluginName,
+        version: pluginVersion,
+        code: {
+          pluginJava: pluginJava,
+          pluginYML: pluginYML,
+          configYML: configYML,
+          dependencies: dependenciesArray
+        },
       },
+      code: 422
     };
   } finally {
     await fs.rm(builderRoot, { recursive: true, force: true }).catch(() => {});
@@ -151,13 +177,22 @@ async function buildJAR(pluginName, pluginVersion, pluginJava, pluginYML, config
 }
 
 /**
- * Creates a new plugin and returns buildJAR
+ * Creates a new plugin and returns file name as result
  */
-plugin.createNew = async function(pluginName, pluginDescription, pluginJava, pluginYML, configYML = "# No config right now", dependencies = [], guildId) {
+plugin.createNew = async function(
+  pluginName: string,
+  pluginDescription: string,
+  pluginJava: string,
+  pluginYML: string,
+  configYML: string = "# No config right now",
+  dependencies: string[] = [],
+  guildId?: string,
+): Promise<ToolResult> {
+  if (!guildId) throw new Error("Missing guildId for plugin.createNew()");
   if (!configYML?.length) configYML = "# No config right now";
 
   // Create GitHub Repo
-  if (!await createRepo(pluginName, guildId)) return { success: false, error: "You tried to create a new plugin, but a plugin with that name already exists!" }
+  if (!await github.createRepo(pluginName, guildId)) return { name: "plugin.createNew", success: false, result: "You tried to create a new plugin, but a plugin with that name already exists!", code: 409 }
 
   // Create dependency string
   // Keep dependencies as structured XML blocks so edits can add/remove them later.
@@ -171,7 +206,7 @@ plugin.createNew = async function(pluginName, pluginDescription, pluginJava, plu
 
       <modelVersion>4.0.0</modelVersion>
 
-      <groupId>com.agentsteveofficial</groupId>
+      <groupId>com.walrusmc</groupId>
 
       <artifactId>${pluginName}</artifactId>
 
@@ -231,11 +266,11 @@ plugin.createNew = async function(pluginName, pluginDescription, pluginJava, plu
   `
 
   // Write files to GitHub
-  await writeFile(pluginName, `src/main/java/com/agentsteveofficial/${pluginName}.java`, pluginJava, "Initial commit", guildId);
-  await writeFile(pluginName, `src/main/resources/plugin.yml`, pluginYML, "Initial commit", guildId);
-  await writeFile(pluginName, `src/main/resources/config.yml`, configYML, "Initial commit", guildId);
-  await writeFile(pluginName, `pom.xml`, pomXML, "Initial commit", guildId);
-  await writeFile(pluginName, "dependencies.json", JSON.stringify(dependencyBlocks, null, 2), "Dependencies", guildId);
+  await github.writeFile(pluginName, `src/main/java/com/walrusmc/${pluginName}.java`, pluginJava, "Initial commit", guildId);
+  await github.writeFile(pluginName, `src/main/resources/plugin.yml`, pluginYML, "Initial commit", guildId);
+  await github.writeFile(pluginName, `src/main/resources/config.yml`, configYML, "Initial commit", guildId);
+  await github.writeFile(pluginName, `pom.xml`, pomXML, "Initial commit", guildId);
+  await github.writeFile(pluginName, "dependencies.json", JSON.stringify(dependencyBlocks, null, 2), "Dependencies", guildId);
 
   // Write file name to db
   const pluginsDbPath = path.join("db", guildId, "plugins.json");
@@ -255,21 +290,30 @@ plugin.createNew = async function(pluginName, pluginDescription, pluginJava, plu
   await fs.writeFile(pluginsDbPath, JSON.stringify(pluginsDb, null, 2));
 
   // Build JAR
-  return await buildJAR(pluginName, "1.0.0", pluginJava, pluginYML, configYML, pomXML, guildId, dependencyBlocks);
+  return { ...await buildJAR(pluginName, "1.0.0", pluginJava, pluginYML, configYML, pomXML, guildId, dependencyBlocks), name: "plugin.createNew" };
 
 }
 
 /**
  * Edits a pre-existing plugin via deletions/insertions and dependency changes.
  */
-plugin.edit = async function(pluginName, pluginDescription, deletions = [], insertions = [], addDependencies = [], removeDependencies = [], guildId) {
+plugin.edit = async function(
+  pluginName: string,
+  pluginDescription: string,
+  deletions: CodeDeletion[] = [],
+  insertions: CodeInsertion[] = [],
+  addDependencies: string[] = [],
+  removeDependencies: Array<string | number> = [],
+  guildId?: string,
+): Promise<ToolResult> {
+  if (!guildId) throw new Error("Missing guildId for plugin.edit()");
   const sanitizedDeletions = Array.isArray(deletions) ? deletions : [];
   const sanitizedInsertions = Array.isArray(insertions) ? insertions : [];
   const dependenciesToAdd = Array.isArray(addDependencies) ? [...addDependencies] : [];
   const dependenciesToRemove = Array.isArray(removeDependencies) ? [...removeDependencies] : [];
   const pluginsDbPath = path.join("db", guildId, "plugins.json");
 
-  const pluginInfo = JSON.parse(await fs.readFile(`./db/${guildId}/plugins.json`, "utf8")).find(obj => obj.name === pluginName);
+  const pluginInfo = JSON.parse(await fs.readFile(`./db/${guildId}/plugins.json`, "utf8")).find((obj: any) => obj.name === pluginName);
   if (!pluginDescription?.length) pluginDescription = pluginInfo.description;
 
   let pluginsDb = [];
@@ -280,18 +324,18 @@ plugin.edit = async function(pluginName, pluginDescription, deletions = [], inse
   }
 
   // Each edit bumps the stored semver patch so generated jars stay unique.
-  const matchesPlugin = (obj = {}) => obj.name === pluginName || obj.pluginName === pluginName;
+  const matchesPlugin = (obj: any = {}) => obj.name === pluginName || obj.pluginName === pluginName;
   const existingPlugin = pluginsDb.find(matchesPlugin);
   const currentVersion = existingPlugin?.version || "1.0.0";
   const pluginVersion = bumpPatchVersion(currentVersion);
 
-  let pluginJava = await getFile(pluginName, `src/main/java/com/agentsteveofficial/${pluginName}.java`, guildId);
-  let pluginYML = await getFile(pluginName, `src/main/resources/plugin.yml`, guildId);
-  let configYML = await getFile(pluginName, `src/main/resources/config.yml`, guildId);
+  let pluginJava = await github.getFile(pluginName, `src/main/java/com/walrusmc/${pluginName}.java`, guildId);
+  let pluginYML = await github.getFile(pluginName, `src/main/resources/plugin.yml`, guildId);
+  let configYML = await github.getFile(pluginName, `src/main/resources/config.yml`, guildId);
 
-  let dependencies = [];
+  let dependencies: string[] = [];
   try {
-    dependencies = JSON.parse(await getFile(pluginName, "dependencies.json", guildId));
+    dependencies = JSON.parse(await github.getFile(pluginName, "dependencies.json", guildId));
   } catch {
     dependencies = [];
   }
@@ -302,27 +346,27 @@ plugin.edit = async function(pluginName, pluginDescription, deletions = [], inse
   if (updatedPluginJava !== pluginJava) {
     log.info(`Applying changes to ${pluginName}.java`);
     pluginJava = updatedPluginJava;
-    await writeFile(pluginName, `src/main/java/com/agentsteveofficial/${pluginName}.java`, pluginJava, `Update ${pluginName}.java to ${pluginVersion}`, guildId);
+    await github.writeFile(pluginName, `src/main/java/com/walrusmc/${pluginName}.java`, pluginJava, `Update ${pluginName}.java to ${pluginVersion}`, guildId);
   }
 
   const updatedPluginYML = applyTextChanges(pluginYML, "pluginYML", sanitizedDeletions, sanitizedInsertions);
   if (updatedPluginYML !== pluginYML) {
     log.info(`Applying changes to ${pluginName} plugin.yml`);
     pluginYML = updatedPluginYML;
-    await writeFile(pluginName, `src/main/resources/plugin.yml`, pluginYML, `Update plugin.yml to ${pluginVersion}`, guildId);
+    await github.writeFile(pluginName, `src/main/resources/plugin.yml`, pluginYML, `Update plugin.yml to ${pluginVersion}`, guildId);
   }
 
   const updatedConfigYML = applyTextChanges(configYML, "configYML", sanitizedDeletions, sanitizedInsertions);
   if (updatedConfigYML !== configYML) {
     log.info(`Applying changes to ${pluginName} config.yml`);
     configYML = updatedConfigYML;
-    await writeFile(pluginName, `src/main/resources/config.yml`, configYML, `Update config.yml to ${pluginVersion}`, guildId);
+    await github.writeFile(pluginName, `src/main/resources/config.yml`, configYML, `Update config.yml to ${pluginVersion}`, guildId);
   }
 
   if (dependenciesToRemove.length) {
     // Remove dependencies in reverse order so earlier indexes are unaffected.
     dependenciesToRemove
-      .map(num => Number.parseInt(num, 10))
+      .map((num) => Number.parseInt(String(num), 10))
       .filter(num => Number.isFinite(num))
       .sort((a, b) => b - a)
       .forEach(indexOneBased => {
@@ -346,7 +390,7 @@ plugin.edit = async function(pluginName, pluginDescription, deletions = [], inse
 
     <modelVersion>4.0.0</modelVersion>
 
-    <groupId>com.agentsteveofficial</groupId>
+    <groupId>com.walrusmc</groupId>
 
     <artifactId>${pluginName}</artifactId>
 
@@ -405,8 +449,8 @@ plugin.edit = async function(pluginName, pluginDescription, deletions = [], inse
 </project>
 `;
 
-  await writeFile(pluginName, "pom.xml", pomXML, `Update pom.xml to ${pluginVersion}`, guildId);
-  await writeFile(pluginName, "dependencies.json", JSON.stringify(dependencies, null, 2), "Update dependencies list", guildId);
+  await github.writeFile(pluginName, "pom.xml", pomXML, `Update pom.xml to ${pluginVersion}`, guildId);
+  await github.writeFile(pluginName, "dependencies.json", JSON.stringify(dependencies, null, 2), "Update dependencies list", guildId);
 
   const pluginRecord = {
     name: pluginName,
@@ -421,25 +465,25 @@ plugin.edit = async function(pluginName, pluginDescription, deletions = [], inse
   }
   await fs.writeFile(pluginsDbPath, JSON.stringify(pluginsDb, null, 2));
 
-  return await buildJAR(pluginName, pluginVersion, pluginJava, pluginYML, configYML, pomXML, guildId, dependencies);
+  return { ...await buildJAR(pluginName, pluginVersion, pluginJava, pluginYML, configYML, pomXML, guildId, dependencies), name: "plugin.edit"};
 
 }
 /**
  * Retrieves full pluginCode for each file specified
  * files = [pluginJava, pluginYML, configYML]
  */
-plugin.retrieveCode = async function(pluginName, files, guildId) {
+plugin.retrieveCode = async function(pluginName: string, files: string[], guildId: string): Promise<ToolResult> {
 
-  let code = {};
+  const code: any = {};
 
-  pluginInfo = JSON.parse(await fs.readFile(`./db/${guildId}/plugins.json`, "utf8")).find(obj => obj.name === pluginName);
-  pluginDescription = pluginInfo.description;
-  code.pluginJava = files.includes("pluginJava") ? await getFile(pluginName, `src/main/java/com/agentsteveofficial/${pluginName}.java`, guildId) : false;
-  code.pluginYML = files.includes("pluginYML") ? await getFile(pluginName, `src/main/resources/plugin.yml`, guildId) : false;
-  code.configYML = files.includes("configYML") ? await getFile(pluginName, "src/main/resources/config.yml", guildId) : false;
-  let dependencies = [];
+  const pluginInfo = JSON.parse(await fs.readFile(`./db/${guildId}/plugins.json`, "utf8")).find((obj: any) => obj.name === pluginName);
+  const pluginDescription = pluginInfo?.description ?? "";
+  code.pluginJava = files.includes("pluginJava") ? await github.getFile(pluginName, `src/main/java/com/walrusmc/${pluginName}.java`, guildId) : false;
+  code.pluginYML = files.includes("pluginYML") ? await github.getFile(pluginName, `src/main/resources/plugin.yml`, guildId) : false;
+  code.configYML = files.includes("configYML") ? await github.getFile(pluginName, "src/main/resources/config.yml", guildId) : false;
+  let dependencies: string[] = [];
   try {
-    dependencies = JSON.parse(await getFile(pluginName, "dependencies.json", guildId));
+    dependencies = JSON.parse(await github.getFile(pluginName, "dependencies.json", guildId));
   } catch {
     dependencies = [];
   }
@@ -503,8 +547,8 @@ plugin.retrieveCode = async function(pluginName, files, guildId) {
   }
 
   if (dependencies?.length) {
-    counter = 2;
-    lines = [];
+    let counter = 2;
+    const lines: Array<{ dependency: number; block: string }> = [];
     for (const dependency of dependencies) {
       counter++;
       lines.push( { dependency: counter, block: dependency } );
@@ -512,22 +556,27 @@ plugin.retrieveCode = async function(pluginName, files, guildId) {
     code.dependencies.push(... lines);
   }
 
-  return JSON.stringify({
-    pluginName,
-    pluginDescription: pluginDescription,
-    pluginJava: code.pluginJava,
-    pluginYML: code.pluginYML,
-    configYML: code.configYML,
-    dependencies: code.dependencies
-  }, null, 2);
+  return {
+    name: "plugin.retrieveCode",
+    success: true,
+    result: {
+      pluginName,
+      pluginDescription: pluginDescription,
+      pluginJava: code.pluginJava,
+      pluginYML: code.pluginYML,
+      configYML: code.configYML,
+      dependencies: code.dependencies
+    },
+    code: 200
+  }
 }
 
 /**
  * generates a plugin crash report
  */
-plugin.crashReport = async function(pluginName, version, code, error) {
-  pluginInfo = JSON.parse(await fs.readFile(`./db/${guildId}/plugins.json`, "utf8")).find(obj => obj.name === pluginName);
-  pluginDescription = pluginInfo.description;
+plugin.crashReport = async function(pluginName: string, version: string, code: any, error: string, guildId: string): Promise<ToolResult> {
+  const pluginInfo = JSON.parse(await fs.readFile(`./db/${guildId}/plugins.json`, "utf8")).find((obj: any) => obj.name === pluginName);
+  const pluginDescription = pluginInfo?.description ?? "";
   // Add line numbers to files
   if (code?.pluginJava) {
     let counter = 0;
@@ -565,20 +614,25 @@ plugin.crashReport = async function(pluginName, version, code, error) {
     code.configYML = "Could not find config.yml";
   }
 
-return `Here is the crash report, code, and plugin information:
------ BEGINNING OF PLUGIN INFO -----
-${JSON.stringify({
-    pluginName,
-    pluginDescription,
-    pluginJava: code.pluginJava,
-    pluginYML: code.pluginYML,
-    configYML: code.configYML,
-    dependencies: code.dependencies
-  }, null, 2)}
------ END OF PLUGIN INFO -----
+  return {
+    name: "plugin.crashReport",
+    success: true,
+    result: `Here is the crash report, code, and plugin information:
+  ----- BEGINNING OF PLUGIN INFO -----
+  ${JSON.stringify({
+      pluginName,
+      pluginDescription,
+      pluginJava: code.pluginJava,
+      pluginYML: code.pluginYML,
+      configYML: code.configYML,
+      dependencies: code.dependencies
+    }, null, 2)}
+  ----- END OF PLUGIN INFO -----
 
-Here is the Maven crash report:
------ BEGINNING OF MAVEN CRASH REPORT -----
-${error}
------ END OF MAVEN CRASH REPORT -----`
+  Here is the Maven crash report:
+  ----- BEGINNING OF MAVEN CRASH REPORT -----
+  ${error}
+  ----- END OF MAVEN CRASH REPORT -----`,
+    code: 200
+  }
 }
