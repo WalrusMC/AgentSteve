@@ -16,9 +16,9 @@ export type PastChats = CustomMessage[];
 export type ToolResult = {
   name: string;
   success: boolean;
-  result: unknown;
+  result: any;
   code: number;
-  metaData?: unknown;
+  metaData?: any;
 };
 
 export type AgentInfo = {
