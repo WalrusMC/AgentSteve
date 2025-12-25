@@ -19,6 +19,6 @@ app.use("/", (_req: any, res: any) => {
   res.status(404);
 })
 
-app.listen(PORT, HOSTNAME, () => {
+app.listen(`${HOSTNAME}:${PORT}`, () => {
   console.log(`Server started: http://${HOSTNAME}:${PORT} `);
 })
