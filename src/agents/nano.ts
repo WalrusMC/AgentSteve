@@ -62,7 +62,7 @@ Output rules:
  * - Uses gpt-5-nano as a lightweight reasoning controller and responder to either forward
  *   to the moderate responder or answer directly when trivial.
  */
-export async function nano(info: AgentInfo, toolHistory: ToolResult[]): Promise<ResponderResponse> {
+export async function nano(info: AgentInfo, toolHistory: ToolResult<any, any>[]): Promise<ResponderResponse> {
   const { message } = info;
   const { pastChats } = info;
   //const { summary } = info; // "String"

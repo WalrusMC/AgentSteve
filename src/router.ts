@@ -3,7 +3,7 @@ import { moderate } from "./agents/moderate.js";
 import { nano } from "./agents/nano.js";
 import type { AgentInfo, ToolResult, ResponderResponse } from "./types.js";
 
-export async function router(info: AgentInfo, toolHistory: ToolResult[]): Promise<ResponderResponse> {
+export async function router(info: AgentInfo, toolHistory: ToolResult<any, any>[]): Promise<ResponderResponse> {
   const { message } = info;
 
   /*

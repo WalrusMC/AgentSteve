@@ -11,7 +11,7 @@ import { moderate } from "./agents/moderate.js";
 import { getPastChats } from "./utils/getPastChats.js";
 import { gdoc } from "./tools/google.js";
 
-import type { AgentInfo, ResponderResponse, ToolResult } from "./types.js";
+import type { AgentInfo, ResponderResponse, ToolResult, ReadDocSuccess, ReadDocFail } from "./types.js";
 
 // Logger scoped to the Discord bot entrypoint
 const log = createLogger("index");
@@ -112,7 +112,7 @@ client.on("messageCreate", async (message) => {
     message,
     pastChats: await getPastChats(message, 2100)
   }
-  const toolHistory: ToolResult[] = [];
+  const toolHistory: ToolResult<any, any>[] = [];
   currentlyRunning[`${message.guildId}`] = true;
 
   let typingInterval: NodeJS.Timeout | undefined;
@@ -185,25 +185,26 @@ client.on("messageCreate", async (message) => {
 
     // Documents
     // TO DO: Improve the toolResult system (toolResult.result)
-    const readDocResult: ToolResult = message.content.includes("https://docs.google.com/document/d/") ? await gdoc.read(message.content, message) : { name: "readDoc", success: false, result: { status: "NO_DOCS" }, code: 204 };
-    switch (readDocResult.result) {
-      case "FORBIDDEN":
-      case "NO_AUTH":
-        return; // Message is sent to user on how they can authorize Steve to access Doc.
-      case "NOT_FOUND":
-        readDocResult.result = "Document not found or inaccessible (missing permission, or broken link).";
-        break;
+    const readDocResult: ToolResult<ReadDocSuccess, ReadDocFail> = message.content.includes("https://docs.google.com/document/d/") ? await gdoc.read(message.content, message) : { name: "readDoc", success: false, error: { reason: "NO_DOCS", code: 204 } };
+    if (!readDocResult.success) {
+      switch (readDocResult.error.reason) {
+        case "FORBIDDEN":
+        case "NO_AUTH":
+          return; // Message is sent to user on how they can authorize Steve to access Doc.
+      }
     }
     if (readDocResult.success) {
-      if (readDocResult.metaData.size > 20000) {
+      if (readDocResult.result.size > 20000) {
         // TO DO: Document summarizer (Feed sections of document to GPT nano)
-        if (readDocResult.result.length > 1) return await message.reply("Those documents are too big for me to read! Try sending me a single, smaller document.");
+        if (readDocResult.result.documents.length > 1) return await message.reply("Those documents are too big for me to read! Try sending me a single, smaller document.");
         return await message.reply("That document is too big for me to read! Try sending me a smaller one. (< 15,000 characters)");
-      } else if (readDocResult.metaData.size > 5000) {
+      } else if (readDocResult.result.size > 5000) {
         // TO DO: Rate limit big documents
       }
     }
-    if (readDocResult.code !== 204 && readDocResult.code !== 404) toolHistory.push({ ...readDocResult, name: "readDoc" });
+    if (!readDocResult.success && readDocResult?.error?.code !== 204 && readDocResult?.error?.code !== 404) toolHistory.push({ ...readDocResult, name: "readDoc" });
+    if (readDocResult.success) toolHistory.push({ ...readDocResult, name: "readDoc" });
+
 
     /*
     // Summaries - TO DO: Completely redesign summaries
