@@ -6,7 +6,28 @@ import { fileURLToPath } from 'url';
 import { createLogger } from "../utils/logger.js";
 import { github } from "../utils/github.js";
 
-import type { ToolResult } from "../types.ts";
+import type { ToolResult, PluginCodes } from "../types.ts";
+
+type CodeLine = {
+  line: number,
+  text: string
+}
+type Dependency = {
+  dependency: number,
+  block: string
+}
+type CodeLines = {
+  pluginJava?: CodeLine[],
+  pluginYML?: CodeLine[],
+  configYML?: CodeLine[],
+  dependencies?: Dependency[]
+}
+type CodeStrings = {
+  pluginJava?: string,
+  pluginYML?: string,
+  configYML?: string,
+  dependencies?: Dependency[]
+}
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -64,6 +85,76 @@ const applyTextChanges = (
   return lines.join("\n");
 };
 
+// Converts strings to arrays of lines.
+function codeStringsToLines(code: CodeStrings): CodeLines {
+
+  const returnCode: CodeLines = {};
+
+  returnCode.dependencies = [ 
+    {
+      dependency: 1, 
+      block: `<dependency>
+      <groupId>io.papermc.paper</groupId>
+      <artifactId>paper-api</artifactId>
+      <version>1.20.1-R0.1-SNAPSHOT</version>
+      <scope>provided</scope>
+    </dependency>`
+    }, 
+    {
+      dependency: 2,
+      block: `
+      <dependency>
+        <groupId>net.kyori</groupId>
+        <artifactId>adventure-api</artifactId>
+        <version>4.14.0</version>
+      </dependency>`
+    },
+  ];
+
+  // Add line numbers to files
+  if (code?.pluginJava) {
+    let counter = 0;
+    const lines = [];
+    for (const line of code.pluginJava.split("\n")) {
+      counter++;
+      lines.push( { line: counter, text: line } );
+    }
+    returnCode.pluginJava = lines;
+  }
+
+  if (code?.pluginYML) {
+    let counter = 0;
+    const lines = [];
+    for (const line of code.pluginYML.split("\n")) {
+      counter++;
+      lines.push( { line: counter, text: line } );
+    }
+    returnCode.pluginYML = lines;
+  }
+
+  if (code?.configYML) {
+    let counter = 0;
+    const lines = [];
+    for (const line of code.configYML.split("\n")) {
+      counter++;
+      lines.push( { line: counter, text: line } );
+    }
+    returnCode.configYML = lines;
+  }
+
+  if (code.dependencies?.length) {
+    let counter = 2;
+    const blocks: Array<{ dependency: number; block: string }> = [];
+    for (const dependency of code.dependencies) {
+      blocks.push( { dependency: counter, block: dependency.block } );
+      counter++;
+    }
+    returnCode.dependencies.push(... blocks);
+  }
+
+  return returnCode;
+}
+
 /**
  * {
  *  success: true/false
@@ -80,7 +171,7 @@ async function buildJAR(
   pomXML: string,
   guildId: string,
   dependencies: string[] = [],
-): Promise<ToolResult> {
+): Promise<ToolResult<`${string}.jar`, { information: string, code: PluginCodes }>> {
   const dependenciesArray = [ 
     {
       dependency: 1, 
@@ -107,8 +198,8 @@ async function buildJAR(
     let counter = 2;
     let lines = [];
     for (const dependency of dependencies) {
-      counter++;
       lines.push( { dependency: counter, block: dependency } );
+      counter++;
     }
     dependenciesArray.push(... lines);
   };
@@ -119,7 +210,7 @@ async function buildJAR(
   const resourcesDir = path.join(builderRoot, "src", "main", "resources");
   const pomPath = path.join(builderRoot, "pom.xml");
   const storedGuildDir = path.join(__dirname, "downloads", guildId);
-  const jarOutputName = `${pluginName}-${pluginVersion}.jar`;
+  const jarOutputName: `${string}.jar` = `${pluginName}-${pluginVersion}.jar`;
 
   try {
     await fs.rm(builderRoot, { recursive: true, force: true });
@@ -149,8 +240,7 @@ async function buildJAR(
     return { 
       name: "buildJAR",
       success: true,
-      result: jarOutputName,
-      code: 200
+      result: jarOutputName
     };
   } catch (err: unknown) {
     const error = err as any;
@@ -158,18 +248,20 @@ async function buildJAR(
     return {
       name: "buildJAR",
       success: false,
-      result: {
-        error: error?.stderr || error?.stdout || error?.message,
-        pluginName: pluginName,
-        version: pluginVersion,
-        code: {
-          pluginJava: pluginJava,
-          pluginYML: pluginYML,
-          configYML: configYML,
-          dependencies: dependenciesArray
-        },
+      error: {
+        code: "CRASH",
+        information: JSON.stringify({
+          error: error?.stderr || error?.stdout || error?.message,
+          pluginName: pluginName,
+          version: pluginVersion,
+          code: codeStringsToLines({
+            pluginJava,
+            pluginYML,
+            configYML,
+            dependencies: dependenciesArray
+          })
+        }, null, 2),
       },
-      code: 422
     };
   } finally {
     await fs.rm(builderRoot, { recursive: true, force: true }).catch(() => {});
@@ -187,12 +279,12 @@ plugin.createNew = async function(
   configYML: string = "# No config right now",
   dependencies: string[] = [],
   guildId?: string,
-): Promise<ToolResult> {
+): Promise<ToolResult<string, { information: string, code: PluginCodes }>> {
   if (!guildId) throw new Error("Missing guildId for plugin.createNew()");
   if (!configYML?.length) configYML = "# No config right now";
 
   // Create GitHub Repo
-  if (!await github.createRepo(pluginName, guildId)) return { name: "plugin.createNew", success: false, result: "You tried to create a new plugin, but a plugin with that name already exists!", code: 409 }
+  if (!await github.createRepo(pluginName, guildId)) return { name: "plugin.createNew", success: false, error: { information: "You tried to create a new plugin, but a plugin with that name already exists!", code: "ALREADY_EXISTS" } };
 
   // Create dependency string
   // Keep dependencies as structured XML blocks so edits can add/remove them later.
@@ -305,7 +397,7 @@ plugin.edit = async function(
   addDependencies: string[] = [],
   removeDependencies: Array<string | number> = [],
   guildId?: string,
-): Promise<ToolResult> {
+): Promise<ToolResult<`${string}.jar`, { information: string, code: PluginCodes }>> {
   if (!guildId) throw new Error("Missing guildId for plugin.edit()");
   const sanitizedDeletions = Array.isArray(deletions) ? deletions : [];
   const sanitizedInsertions = Array.isArray(insertions) ? insertions : [];
@@ -472,167 +564,25 @@ plugin.edit = async function(
  * Retrieves full pluginCode for each file specified
  * files = [pluginJava, pluginYML, configYML]
  */
-plugin.retrieveCode = async function(pluginName: string, files: string[], guildId: string): Promise<ToolResult> {
+plugin.retrieveCode = async function(pluginName: string, files: string[], guildId: string): Promise<ToolResult<{ name: string, description: string, code: CodeLines }, string>> {
 
-  const code: any = {};
+  const oldCode: CodeStrings = {};
 
   const pluginInfo = JSON.parse(await fs.readFile(`./db/${guildId}/plugins.json`, "utf8")).find((obj: any) => obj.name === pluginName);
   const pluginDescription = pluginInfo?.description ?? "";
-  code.pluginJava = files.includes("pluginJava") ? await github.getFile(pluginName, `src/main/java/com/walrusmc/${pluginName}.java`, guildId) : false;
-  code.pluginYML = files.includes("pluginYML") ? await github.getFile(pluginName, `src/main/resources/plugin.yml`, guildId) : false;
-  code.configYML = files.includes("configYML") ? await github.getFile(pluginName, "src/main/resources/config.yml", guildId) : false;
-  let dependencies: string[] = [];
-  try {
-    dependencies = JSON.parse(await github.getFile(pluginName, "dependencies.json", guildId));
-  } catch {
-    dependencies = [];
-  }
+  oldCode.pluginJava = files.includes("pluginJava") ? await github.getFile(pluginName, `src/main/java/com/walrusmc/${pluginName}.java`, guildId) : undefined;
+  oldCode.pluginYML = files.includes("pluginYML") ? await github.getFile(pluginName, `src/main/resources/plugin.yml`, guildId) : undefined;
+  oldCode.configYML = files.includes("configYML") ? await github.getFile(pluginName, "src/main/resources/config.yml", guildId) : undefined;
   
-  code.dependencies = [ 
-    {
-      dependency: 1, 
-      block: `<dependency>
-      <groupId>io.papermc.paper</groupId>
-      <artifactId>paper-api</artifactId>
-      <version>1.20.1-R0.1-SNAPSHOT</version>
-      <scope>provided</scope>
-    </dependency>`
-    }, 
-    {
-      dependency: 2,
-      block: `
-      <dependency>
-        <groupId>net.kyori</groupId>
-        <artifactId>adventure-api</artifactId>
-        <version>4.14.0</version>
-      </dependency>`
-    },
-  ];
-
-  // Add line numbers to files
-  if (code?.pluginJava) {
-    let counter = 0;
-    const lines = [];
-    for (const line of code.pluginJava.split("\n")) {
-      counter++;
-      lines.push( { line: counter, text: line } );
-    }
-    code.pluginJava = lines;
-  } else {
-    code.pluginJava = `You did not ask for the ${pluginName}.java code.`;
-  }
-
-  if (code?.pluginYML) {
-    let counter = 0;
-    const lines = [];
-    for (const line of code.pluginYML.split("\n")) {
-      counter++;
-      lines.push( { line: counter, text: line } );
-    }
-    code.pluginYML = lines;
-  } else {
-    code.pluginYML = "You did not ask for the plugin.yml code.";
-  }
-
-  if (code?.configYML) {
-    let counter = 0;
-    const lines = [];
-    for (const line of code.configYML.split("\n")) {
-      counter++;
-      lines.push( { line: counter, text: line } );
-    }
-    code.configYML = lines;
-  } else {
-    code.configYML = "You did not ask for the config.yml code.";
-  }
-
-  if (dependencies?.length) {
-    let counter = 2;
-    const lines: Array<{ dependency: number; block: string }> = [];
-    for (const dependency of dependencies) {
-      counter++;
-      lines.push( { dependency: counter, block: dependency } );
-    }
-    code.dependencies.push(... lines);
-  }
+  const newCode = codeStringsToLines(oldCode)
 
   return {
     name: "plugin.retrieveCode",
     success: true,
     result: {
-      pluginName,
-      pluginDescription: pluginDescription,
-      pluginJava: code.pluginJava,
-      pluginYML: code.pluginYML,
-      configYML: code.configYML,
-      dependencies: code.dependencies
+      name: pluginName,
+      description: pluginDescription,
+      code: newCode
     },
-    code: 200
-  }
-}
-
-/**
- * generates a plugin crash report
- */
-plugin.crashReport = async function(pluginName: string, version: string, code: any, error: string, guildId: string): Promise<ToolResult> {
-  const pluginInfo = JSON.parse(await fs.readFile(`./db/${guildId}/plugins.json`, "utf8")).find((obj: any) => obj.name === pluginName);
-  const pluginDescription = pluginInfo?.description ?? "";
-  // Add line numbers to files
-  if (code?.pluginJava) {
-    let counter = 0;
-    const lines = [];
-    for (const line of code.pluginJava.split("\n")) {
-      counter++;
-      lines.push( { line: counter, text: line } );
-    }
-    code.pluginJava = lines;
-  } else {
-    code.pluginJava = `Could not find ${pluginName}.java`;
-  }
-
-  if (code?.pluginYML) {
-    let counter = 0;
-    const lines = [];
-    for (const line of code.pluginYML.split("\n")) {
-      counter++;
-      lines.push( { line: counter, text: line } );
-    }
-    code.pluginYML = lines;
-  } else {
-    code.pluginYML = "Could not find plugin.yml";
-  }
-
-  if (code?.configYML) {
-    let counter = 0;
-    const lines = [];
-    for (const line of code.configYML.split("\n")) {
-      counter++;
-      lines.push( { line: counter, text: line } );
-    }
-    code.configYML = lines;
-  } else {
-    code.configYML = "Could not find config.yml";
-  }
-
-  return {
-    name: "plugin.crashReport",
-    success: true,
-    result: `Here is the crash report, code, and plugin information:
-  ----- BEGINNING OF PLUGIN INFO -----
-  ${JSON.stringify({
-      pluginName,
-      pluginDescription,
-      pluginJava: code.pluginJava,
-      pluginYML: code.pluginYML,
-      configYML: code.configYML,
-      dependencies: code.dependencies
-    }, null, 2)}
-  ----- END OF PLUGIN INFO -----
-
-  Here is the Maven crash report:
-  ----- BEGINNING OF MAVEN CRASH REPORT -----
-  ${error}
-  ----- END OF MAVEN CRASH REPORT -----`,
-    code: 200
   }
 }

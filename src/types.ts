@@ -25,9 +25,10 @@ export type ResponderResponse = {
   messages: Message<boolean>[] | false;
   isClarification: boolean;
   responder: "nano" | "moderate" | "complex";
-}
+};
 
 /** TOOLS **/
+// General Tools
 export type ToolSuccess<T> = {
   success: true;
   result: T;
@@ -42,6 +43,7 @@ export type ToolResult<T, E> = {
   name: string;
 } & (ToolSuccess<T> | ToolError<E>);
 
+// Google Docs
 export type ReadDocSuccess = {
   size: number;
   documents: {
@@ -50,16 +52,17 @@ export type ReadDocSuccess = {
     link: string;
     tabs: DocTabs;
   }[]
-}
+};
 export type DocTabs = {
   title: string;
   content: string;
   subTabs?: DocTabs;
-}[]
+}[];
 
 export type ReadDocFail = {
   reason: "NO_DOCS" | "NO_AUTH" | "NOT_FOUND" | "FORBIDDEN" | "UNKNOWN";
   code: number;
-}
+};
 
-// Started working on making better tool result types
+// Plugins
+export type PluginCodes = "CRASH" | "ALREADY_EXISTS" | "UNKOWN";
