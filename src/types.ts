@@ -48,7 +48,7 @@ export type ReadDocSuccess = {
   size: number;
   documents: {
     title: string;
-    id: number;
+    id: string;
     link: string;
     tabs: DocTabs;
   }[]

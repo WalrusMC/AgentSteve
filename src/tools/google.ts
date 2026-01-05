@@ -1,9 +1,38 @@
 import { google } from "googleapis";
 import fs from "fs/promises";
 import type { Message } from "discord.js";
-import type { ToolResult, ReadDocSuccess, ReadDocFail, DocTabs } from "../types.js";
+import type { ToolResult } from "../types.js";
 
-// TO DO: Create interface and types!!!!
+// Types & Interfaces
+interface Gdoc {
+  read(
+      content: string | false,
+      message: Message, 
+      ids?: string[]
+    ): Promise<ToolResult<ReadDocSuccess, ReadDocFail>>;
+    extractIds(content: string): string[];
+}
+
+type ReadDocSuccess = {
+  size: number;
+  documents: {
+    title: string;
+    id: string;
+    link: string;
+    tabs: DocTabs;
+  }[]
+};
+
+type DocTabs = {
+  title: string;
+  content: string;
+  subTabs?: DocTabs;
+}[];
+
+type ReadDocFail = {
+  reason: "NO_DOCS" | "NO_AUTH" | "NOT_FOUND" | "FORBIDDEN" | "UNKNOWN";
+  code: number;
+};
 
 const KEY_FILE = JSON.parse(await fs.readFile("./google-key-file.json", "utf8")).web;
 const CLIENT_SECRET = KEY_FILE.client_secret;
@@ -18,7 +47,7 @@ const createOAuthClient = () =>
     "http://localhost:3000/aiagents/steve/oauth/google/callback"
   );
 
-export const gdoc: any = {};
+export const gdoc: Gdoc = {} as Gdoc;
 
 /** Extracts different document tabs out of a document and returns:
  * [
@@ -29,7 +58,7 @@ export const gdoc: any = {};
  *  }
  * ]
 */
-gdoc.getTabs = function(tabs: any[]) {
+const getTabs = function(tabs: any[]) {
   const tabArray: DocTabs = [];
   (tabs || []).forEach((obj: any) => {
     let content = "";
@@ -43,7 +72,7 @@ gdoc.getTabs = function(tabs: any[]) {
     tabArray.push({
       title: obj?.tabProperties?.title ?? "Untitled",
       content: content,
-      subTabs: obj?.childTabs?.length ? gdoc.getTabs(obj.childTabs) : []
+      subTabs: obj?.childTabs?.length ? getTabs(obj.childTabs) : []
     })
 
   })
@@ -52,7 +81,7 @@ gdoc.getTabs = function(tabs: any[]) {
 
 // TO DO: Fix tool results for document reading capabilities!!!!
 // Entry point for extracting documents from a message
-gdoc.read = async function(content: string | false, message: Message, ids?: string[]): Promise<ToolResult<ReadDocSuccess, ReadDocFail>> {
+gdoc.read = async function(content, message, ids) {
 
   // Extract IDs or use given IDs
   const docIds = content ? gdoc.extractIds(content) : ids;
@@ -156,7 +185,7 @@ gdoc.read = async function(content: string | false, message: Message, ids?: stri
         title: res.data.title,
         id: id,
         link: `https://docs.google.com/document/d/${id}/`,
-        tabs: gdoc.getTabs(res.data.tabs || [])
+        tabs: getTabs(res.data.tabs || [])
       });
     }
   }
@@ -192,7 +221,7 @@ gdoc.read = async function(content: string | false, message: Message, ids?: stri
 }
 
 // Extracts document IDs from a message if they exist
-gdoc.extractIds = function(content: string) {
+gdoc.extractIds = function(content) {
   const docIds: string[] = [];
   const ids = content.split("https://docs.google.com/document/d/");
   if (!ids?.length) return [];
