@@ -43,7 +43,7 @@ export type ToolResult<T, E> = {
   name: string;
 } & (ToolSuccess<T> | ToolError<E>);
 
-// Google Docs
+// G Docs
 export type ReadDocSuccess = {
   size: number;
   documents: {
@@ -53,6 +53,7 @@ export type ReadDocSuccess = {
     tabs: DocTabs;
   }[]
 };
+
 export type DocTabs = {
   title: string;
   content: string;
@@ -63,6 +64,3 @@ export type ReadDocFail = {
   reason: "NO_DOCS" | "NO_AUTH" | "NOT_FOUND" | "FORBIDDEN" | "UNKNOWN";
   code: number;
 };
-
-// Plugins
-export type PluginCodes = "CRASH" | "ALREADY_EXISTS" | "UNKOWN";

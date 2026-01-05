@@ -1,7 +1,7 @@
 import { google } from "googleapis";
 import fs from "fs/promises";
 import type { Message } from "discord.js";
-import type { ToolResult } from "../types.js";
+import type { ToolResult, ReadDocFail, ReadDocSuccess, DocTabs } from "../types.js";
 
 // Types & Interfaces
 interface Gdoc {
@@ -12,27 +12,6 @@ interface Gdoc {
     ): Promise<ToolResult<ReadDocSuccess, ReadDocFail>>;
     extractIds(content: string): string[];
 }
-
-type ReadDocSuccess = {
-  size: number;
-  documents: {
-    title: string;
-    id: string;
-    link: string;
-    tabs: DocTabs;
-  }[]
-};
-
-type DocTabs = {
-  title: string;
-  content: string;
-  subTabs?: DocTabs;
-}[];
-
-type ReadDocFail = {
-  reason: "NO_DOCS" | "NO_AUTH" | "NOT_FOUND" | "FORBIDDEN" | "UNKNOWN";
-  code: number;
-};
 
 const KEY_FILE = JSON.parse(await fs.readFile("./google-key-file.json", "utf8")).web;
 const CLIENT_SECRET = KEY_FILE.client_secret;

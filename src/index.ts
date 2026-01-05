@@ -11,7 +11,7 @@ import { moderate } from "./agents/moderate.js";
 import { getPastChats } from "./utils/getPastChats.js";
 import { gdoc } from "./tools/google.js";
 
-import type { AgentInfo, ResponderResponse, ToolResult, ReadDocSuccess, ReadDocFail } from "./types.js";
+import type { AgentInfo, ResponderResponse, ToolResult, ReadDocFail, ReadDocSuccess } from "./types.js";
 
 // Logger scoped to the Discord bot entrypoint
 const log = createLogger("index");

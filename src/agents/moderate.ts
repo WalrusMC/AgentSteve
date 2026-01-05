@@ -6,7 +6,7 @@ import { createLogger } from "../utils/logger.js";
 import { gdoc } from "../tools/google.js";
 import { models } from "../models.js";
 import { server } from "../tools/server.js";
-import type { AgentInfo, ReadDocFail, ReadDocSuccess, ResponderResponse, ToolResult } from "../types.js";
+import type { AgentInfo, ResponderResponse, ToolResult } from "../types.js";
 const client = new OpenAI;
 const log = createLogger("moderate");
 
@@ -339,10 +339,7 @@ export async function moderate(info: AgentInfo, toolHistory: ToolResult<any, any
             toolHistory.push({
               name: "readDoc",
               success: false,
-              error: {
-                reason: `The requested document/documents (${args.ids}) was/were too big. Documents should be a maximum of ~15,000.`,
-                code: 400
-              }
+              error: `The requested document/documents (${args.ids}) was/were too big. Documents should be a maximum of ~15,000.`
             });
             return await moderate(info, toolHistory);
           } else {
@@ -362,20 +359,14 @@ export async function moderate(info: AgentInfo, toolHistory: ToolResult<any, any
             toolHistory.push({
               name: "readDoc",
               success: false,
-              error: {
-                reason: `The requested document/documents (${args.ids}) could not be accessed (missing permission, or broken link).`,
-                code: 404
-              }
+              error: `The requested document/documents (${args.ids}) could not be accessed (missing permission, or broken link). Do not try to access that/those document/documents again.`
             });
             return await moderate(info, toolHistory);
           case "UNKNOWN":
             toolHistory.push({
               name: "readDoc",
               success: false,
-              error: {
-                reason: `Failed to read the requested document/documents (${args.ids}) due to a Google API/auth error. Do not try this tool again.`,
-                code: toolResult.error.code,
-              }
+              error: `Failed to read the requested document/documents (${args.ids}) due to a Google API/auth error. Do not try this tool again.`
             });
             return await moderate(info, toolHistory);
           default:

@@ -6,8 +6,7 @@ import { fileURLToPath } from 'url';
 import { createLogger } from "../utils/logger.js";
 import { github } from "../utils/github.js";
 
-import type { ToolResult, PluginCodes } from "../types.ts";
-
+import type { ToolResult } from "../types.ts";
 
 // Types & Interfaces
 interface Plugin {
@@ -55,6 +54,7 @@ type CodeStrings = {
   configYML?: string,
   dependencies?: Dependency[]
 }
+type PluginCodes = "CRASH" | "ALREADY_EXISTS" | "UNKOWN";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
