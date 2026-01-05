@@ -15,7 +15,7 @@ export async function router(info: AgentInfo, toolHistory: ToolResult<any, any>[
   "needs_document_access",
   
   "needs_multiple_server_actions",
-  "needs_code_execution_or_debugging_or_testing",
+  "needs_iterative_code_execution_or_debugging",
   "needs_large_workflow"
   */
   const routingFlags = await classifier(message);

@@ -209,7 +209,20 @@ export async function coder(
   const attachmentNames = message?.attachments?.size 
   ? Array.from(message.attachments.values()).map(a => a.name ?? "").filter(Boolean).join(",")
   : "";
-  const userInput = `(PAST CHATS)\n${pastChats}\n(CURRENT USER MESSAGE)UTC_TIME:${message.createdAt.toISOString()}|ROLE:ADMINISTRATOR|USERNMAME:${message.author.username}|USER_ID:${message.author.id}|CHAT:${message.content}${attachmentNames ? `|ATTACHMENTS:${attachmentNames}` : ""}\n`;
+  const currentUserMessage = {
+    time: message.createdAt.toISOString(),
+    author: {
+      id: message.author.id,
+      username: message.author.username,
+      isAdministrator: true
+    },
+    content: message.content,
+    attachments: attachmentNames,
+  };
+  const userInput = JSON.stringify({
+    pastChats: pastChats,
+    currentUserMessage: currentUserMessage
+  }, null, 2);
 
   // Send request to OpenAI API
   log.response("OPENAI INPUT (CODER)", `|SYSTEM|\n${systemPrompt}\n|DEVELOPER|\n${developerPrompt}\n|USER|\n${userInput}\n|ASSISTANT|\n${JSON.stringify(assistantMessage, null, 2)}`);

@@ -311,6 +311,7 @@ plugin.createNew = async function(
   if (!configYML?.length) configYML = "# No config right now";
 
   // Create GitHub Repo
+  log.debug("Creating repo on github.");
   if (!await github.createRepo(pluginName, guildId)) return { name: "plugin.createNew", success: false, error: { information: "You tried to create a new plugin, but a plugin with that name already exists!", code: "ALREADY_EXISTS" } };
 
   // Create dependency string
@@ -385,6 +386,7 @@ plugin.createNew = async function(
   `
 
   // Write files to GitHub
+  log.debug("Writing code files to github.");
   await github.writeFile(pluginName, `src/main/java/com/walrusmc/${pluginName}.java`, pluginJava, "Initial commit", guildId);
   await github.writeFile(pluginName, `src/main/resources/plugin.yml`, pluginYML, "Initial commit", guildId);
   await github.writeFile(pluginName, `src/main/resources/config.yml`, configYML, "Initial commit", guildId);
@@ -399,18 +401,21 @@ plugin.createNew = async function(
   } catch {
     pluginsDb = [];
   }
-  pluginsDb.push({
-    name: pluginName,
-    pluginName,
-    version: "1.0.0",
-    description: pluginDescription,
-  });
-
-  await fs.writeFile(pluginsDbPath, JSON.stringify(pluginsDb, null, 2));
 
   // Build JAR
-  return { ...await buildJAR(pluginName, "1.0.0", pluginJava, pluginYML, configYML, pomXML, guildId, dependencyBlocks), name: "plugin.createNew" };
+  const result = { ...await buildJAR(pluginName, "1.0.0", pluginJava, pluginYML, configYML, pomXML, guildId, dependencyBlocks), name: "plugin.createNew" };
+  if (result.success) {
+    log.debug("Success! Writing plugin information to database");
+    pluginsDb.push({
+      name: pluginName,
+      pluginName,
+      version: "1.0.0",
+      description: pluginDescription,
+    });
 
+    await fs.writeFile(pluginsDbPath, JSON.stringify(pluginsDb, null, 2));
+  }
+  return result;
 }
 
 /**
