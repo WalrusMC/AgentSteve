@@ -3,6 +3,8 @@ import fs from "fs/promises";
 import type { Message } from "discord.js";
 import type { ToolResult, ReadDocSuccess, ReadDocFail, DocTabs } from "../types.js";
 
+// TO DO: Create interface and types!!!!
+
 const KEY_FILE = JSON.parse(await fs.readFile("./google-key-file.json", "utf8")).web;
 const CLIENT_SECRET = KEY_FILE.client_secret;
 const CLIENT_ID = KEY_FILE.client_id;
@@ -48,6 +50,7 @@ gdoc.getTabs = function(tabs: any[]) {
   return tabArray;
 }
 
+// TO DO: Fix tool results for document reading capabilities!!!!
 // Entry point for extracting documents from a message
 gdoc.read = async function(content: string | false, message: Message, ids?: string[]): Promise<ToolResult<ReadDocSuccess, ReadDocFail>> {
 

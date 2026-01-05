@@ -302,7 +302,7 @@ export async function moderate(info: AgentInfo, toolHistory: ToolResult<any, any
   const toolCall = (response as any).output.find?.((c: any) => c.type === "function_call" || c.type === "tool_call");
   if (toolCall) {
     const args = JSON.parse(toolCall.arguments);
-    //let toolResult: ToolResult<any, any>;
+    let toolResult;
     switch (toolCall.name) {
       case "respond":
         return {
@@ -331,7 +331,8 @@ export async function moderate(info: AgentInfo, toolHistory: ToolResult<any, any
         };
       case "readDoc":
         // TO DO: Add summarizer for really big documents.
-        const toolResult: ToolResult<ReadDocSuccess, ReadDocFail> = await gdoc.read(false, message, args.ids);
+        // TO DO: Fix tool results for document reading capabilities!!!!
+        toolResult = await gdoc.read(false, message, args.ids);
         if (toolResult.success) {
           // TO DO: Improve the toolResult system (toolResult.result)
           if (toolResult.result.size > 20000) {

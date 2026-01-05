@@ -19,7 +19,7 @@ interface Plugin {
     configYML?: string,
     dependencies?: string[],
     guildId?: string,
-  ): Promise<ToolResult<string, { information: string; code: PluginCodes }>>;
+  ): Promise<ToolResult<`${string}.jar`, { information: string; code: PluginCodes }>>;
   edit(
     pluginName: string,
     pluginDescription: string,
