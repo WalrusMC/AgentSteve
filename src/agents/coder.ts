@@ -222,11 +222,11 @@ export async function coder(
   const toolCall = (response as any).output.find?.((c: any) => c.type === "function_call" || c.type === "tool_call");
   if (toolCall) {
     const args = JSON.parse(toolCall.arguments);
-    let toolResult: ToolResult;
+    let toolResult;
     switch (toolCall.name) {
       case "createNewPlugin":
         toolResult = await plugin.createNew(pluginName, args.pluginDescription, args.pluginJava, args.pluginYML, args?.configYML, args?.dependencies, guildId);
-        if (toolResult.success || toolResult.code === 409) {
+        if (toolResult.success || toolResult.error.code) {
           return toolResult; // Success || Plugin with name already exists
         } else {
           // TO DO: Improve the toolResult system (toolResult.result)

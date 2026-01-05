@@ -8,6 +8,33 @@ import { github } from "../utils/github.js";
 
 import type { ToolResult, PluginCodes } from "../types.ts";
 
+
+// Types & Interfaces
+interface Plugin {
+  createNew(
+    pluginName: string,
+    pluginDescription: string,
+    pluginJava: string,
+    pluginYML: string,
+    configYML?: string,
+    dependencies?: string[],
+    guildId?: string,
+  ): Promise<ToolResult<string, { information: string; code: PluginCodes }>>;
+  edit(
+    pluginName: string,
+    pluginDescription: string,
+    deletions: CodeDeletion[],
+    insertions: CodeInsertion[],
+    addDependencies: string[],
+    removeDependencies: Array<string | number>,
+    guildId?: string,
+  ): Promise<ToolResult<`${string}.jar`, { information: string, code: PluginCodes }>>;
+  retrieveCode(
+    pluginName: string, 
+    files: string[], 
+    guildId: string
+  ): Promise<ToolResult<{ name: string, description: string, code: CodeLines }, string>>;
+}
 type CodeLine = {
   line: number,
   text: string
@@ -35,7 +62,7 @@ const log = createLogger("plugin");
 
 const run = promisify(exec);
 
-export const plugin: any = {};
+export const plugin: Plugin = {} as Plugin;
 
 const bumpPatchVersion = (version: string = "1.0.0") => {
   const parts = `${version}`.split(".").map(part => Number.parseInt(part, 10) || 0);
@@ -272,14 +299,14 @@ async function buildJAR(
  * Creates a new plugin and returns file name as result
  */
 plugin.createNew = async function(
-  pluginName: string,
-  pluginDescription: string,
-  pluginJava: string,
-  pluginYML: string,
-  configYML: string = "# No config right now",
-  dependencies: string[] = [],
-  guildId?: string,
-): Promise<ToolResult<string, { information: string, code: PluginCodes }>> {
+  pluginName,
+  pluginDescription,
+  pluginJava,
+  pluginYML,
+  configYML = "# No config right now",
+  dependencies = [],
+  guildId?,
+) {
   if (!guildId) throw new Error("Missing guildId for plugin.createNew()");
   if (!configYML?.length) configYML = "# No config right now";
 
@@ -390,14 +417,14 @@ plugin.createNew = async function(
  * Edits a pre-existing plugin via deletions/insertions and dependency changes.
  */
 plugin.edit = async function(
-  pluginName: string,
-  pluginDescription: string,
-  deletions: CodeDeletion[] = [],
-  insertions: CodeInsertion[] = [],
-  addDependencies: string[] = [],
-  removeDependencies: Array<string | number> = [],
-  guildId?: string,
-): Promise<ToolResult<`${string}.jar`, { information: string, code: PluginCodes }>> {
+  pluginName,
+  pluginDescription,
+  deletions = [],
+  insertions = [],
+  addDependencies = [],
+  removeDependencies = [],
+  guildId?,
+) {
   if (!guildId) throw new Error("Missing guildId for plugin.edit()");
   const sanitizedDeletions = Array.isArray(deletions) ? deletions : [];
   const sanitizedInsertions = Array.isArray(insertions) ? insertions : [];
@@ -564,7 +591,7 @@ plugin.edit = async function(
  * Retrieves full pluginCode for each file specified
  * files = [pluginJava, pluginYML, configYML]
  */
-plugin.retrieveCode = async function(pluginName: string, files: string[], guildId: string): Promise<ToolResult<{ name: string, description: string, code: CodeLines }, string>> {
+plugin.retrieveCode = async function(pluginName, files, guildId) {
 
   const oldCode: CodeStrings = {};
 
