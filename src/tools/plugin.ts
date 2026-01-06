@@ -1,5 +1,4 @@
-import { exec } from "child_process";
-import { promisify } from "util";
+import { spawn } from "child_process";
 import fs from "fs/promises";
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -66,8 +65,6 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const log = createLogger("plugin");
 
-const run = promisify(exec);
-
 export const plugin: Plugin = {} as Plugin;
 
 const bumpPatchVersion = (version: string = "1.0.0") => {
@@ -116,6 +113,40 @@ const applyTextChanges = (
     });
 
   return lines.join("\n");
+};
+
+const appendCapped = (existing: string, chunk: Buffer, cap: number) => {
+  const next = existing + chunk.toString("utf8");
+  return next.length > cap ? next.slice(next.length - cap) : next;
+};
+
+const runMavenBuild = async (cwd: string) => {
+  const outputCap = 2_000_000;
+  return await new Promise<{ stdout: string; stderr: string }>((resolve, reject) => {
+    const child = spawn("mvn", ["-f", "pom.xml", "-B", "clean", "package"], {
+      cwd,
+      shell: true,
+    });
+
+    let stdout = "";
+    let stderr = "";
+
+    child.stdout?.on("data", (data: Buffer) => {
+      stdout = appendCapped(stdout, data, outputCap);
+    });
+    child.stderr?.on("data", (data: Buffer) => {
+      stderr = appendCapped(stderr, data, outputCap);
+    });
+
+    child.on("error", (err) => reject(err));
+    child.on("close", (code) => {
+      if (code === 0) {
+        resolve({ stdout, stderr });
+        return;
+      }
+      reject({ code, stdout, stderr });
+    });
+  });
 };
 
 // Converts strings to arrays of lines.
@@ -257,7 +288,7 @@ async function buildJAR(
     await fs.writeFile(pomPath, pomXML);
 
     log.info(`Building plugin ${pluginName}-${pluginVersion}.jar`);
-    await run("mvn -f pom.xml clean package", { cwd: builderRoot });
+    await runMavenBuild(builderRoot);
 
     const targetDir = path.join(builderRoot, "target");
     const files = await fs.readdir(targetDir);

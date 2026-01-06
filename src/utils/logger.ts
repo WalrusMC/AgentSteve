@@ -37,7 +37,7 @@ function toJsonValue(value: unknown): unknown {
 function enqueueLog(entry: Record<string, unknown>) {
   writeChain = writeChain.then(async () => {
     await fs.mkdir(LOG_DIR, { recursive: true });
-    await fs.appendFile(LOG_FILE, `${JSON.stringify(entry)}\n`, "utf8");
+    await fs.appendFile(LOG_FILE, `${JSON.stringify(entry, null, 2)}\n`, "utf8");
   }).catch((e: unknown) => {
     if (reportedWriteFailure) return;
     reportedWriteFailure = true;
