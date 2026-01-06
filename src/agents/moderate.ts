@@ -319,7 +319,7 @@ export async function moderate(info: AgentInfo, toolHistory: ToolResult<any, any
         toolResult = await coder(toolCall.name, args.pluginName, args.assistantMessage, args.complex ? models.coder.high.slow : models.coder.medium.slow, info);
         if (toolResult.success) {
           // TO DO: Improve the toolResult system (toolResult.result)
-          downloads[toolResult.result] = "A Minecraft plugin JAR.";
+          downloads[toolResult.result.file] = "A Minecraft plugin JAR.";
           await fs.writeFile(`./db/${message.guildId}/downloads.json`, JSON.stringify(downloads, null, 2));
           toolHistory.push({ ...toolResult, name: toolCall.name});
           return await moderate(info, toolHistory, devInput);

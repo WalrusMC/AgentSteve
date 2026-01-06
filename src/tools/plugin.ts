@@ -55,7 +55,7 @@ type CodeStrings = {
   dependencies?: Dependency[]
 };
 type PluginCodes = "CRASH" | "ALREADY_EXISTS" | "UNKOWN";
-type PluginDB = {
+export type PluginDB = {
   name: string,
   version: string,
   description: string,
