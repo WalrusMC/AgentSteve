@@ -1,7 +1,17 @@
 import { google } from "googleapis";
 import fs from "fs/promises";
 import type { Message } from "discord.js";
-import type { ToolResult } from "../types.js";
+import type { ToolResult, ReadDocFail, ReadDocSuccess, DocTabs } from "../types.js";
+
+// Types & Interfaces
+interface Gdoc {
+  read(
+      content: string | false,
+      message: Message, 
+      ids?: string[]
+    ): Promise<ToolResult<ReadDocSuccess, ReadDocFail>>;
+    extractIds(content: string): string[];
+}
 
 const KEY_FILE = JSON.parse(await fs.readFile("./google-key-file.json", "utf8")).web;
 const CLIENT_SECRET = KEY_FILE.client_secret;
@@ -16,7 +26,7 @@ const createOAuthClient = () =>
     "http://localhost:3000/aiagents/steve/oauth/google/callback"
   );
 
-export const gdoc: any = {};
+export const gdoc: Gdoc = {} as Gdoc;
 
 /** Extracts different document tabs out of a document and returns:
  * [
@@ -27,8 +37,8 @@ export const gdoc: any = {};
  *  }
  * ]
 */
-gdoc.getTabs = function(tabs: any[]) {
-  const tabArray: Array<{ title: string; content: string; subTabs: unknown[] }> = [];
+const getTabs = function(tabs: any[]) {
+  const tabArray: DocTabs = [];
   (tabs || []).forEach((obj: any) => {
     let content = "";
 
@@ -41,15 +51,16 @@ gdoc.getTabs = function(tabs: any[]) {
     tabArray.push({
       title: obj?.tabProperties?.title ?? "Untitled",
       content: content,
-      subTabs: obj?.childTabs?.length ? gdoc.getTabs(obj.childTabs) : []
+      subTabs: obj?.childTabs?.length ? getTabs(obj.childTabs) : []
     })
 
   })
   return tabArray;
 }
 
+// TO DO: Fix tool results for document reading capabilities!!!!
 // Entry point for extracting documents from a message
-gdoc.read = async function(content: string | false, message: Message, ids?: string[]): Promise<ToolResult> {
+gdoc.read = async function(content, message, ids) {
 
   // Extract IDs or use given IDs
   const docIds = content ? gdoc.extractIds(content) : ids;
@@ -61,8 +72,10 @@ gdoc.read = async function(content: string | false, message: Message, ids?: stri
   if (!docIds?.length) return {
     name: "gdoc.read",
     success: false,
-    result: "NO_DOCS",
-    code: 204
+    error: {
+      reason: "NO_DOCS",
+      code: 204
+    }
   };
 
   // Get latest authorization token
@@ -94,8 +107,10 @@ gdoc.read = async function(content: string | false, message: Message, ids?: stri
     return {
       name: "gdoc.read",
       success: false,
-      result: "NO_AUTH",
-      code: 401
+      error: {
+        reason: "NO_AUTH",
+        code: 401
+      }
     };
   }
 
@@ -132,9 +147,10 @@ gdoc.read = async function(content: string | false, message: Message, ids?: stri
         return {
           name: "gdoc.read",
           success: false,
-          result: invalidGrant ? "NO_AUTH" : "FORBIDDEN",
-          code: invalidGrant ? 401 : (status === 401 ? 401 : 403),
-          metaData: { id, status, data }
+          error: {
+            reason: invalidGrant ? "NO_AUTH" : "FORBIDDEN",
+            code: invalidGrant ? 401 : (status === 401 ? 401 : 403)
+          },
         };
       } else if (status === 404) {
         res = false;
@@ -148,7 +164,7 @@ gdoc.read = async function(content: string | false, message: Message, ids?: stri
         title: res.data.title,
         id: id,
         link: `https://docs.google.com/document/d/${id}/`,
-        tabs: gdoc.getTabs(res.data.tabs || [])
+        tabs: getTabs(res.data.tabs || [])
       });
     }
   }
@@ -157,32 +173,34 @@ gdoc.read = async function(content: string | false, message: Message, ids?: stri
   if (!documents?.length) return {
     name: "gdoc.read",
     success: false,
-    result: (() => {
+    error: {
+      reason: (() => {
       const hasUnknown = errors.some(e => e.status == null);
       const hasNon404 = errors.some(e => e.status && e.status !== 404 && e.status !== 401 && e.status !== 403);
-      return hasUnknown || hasNon404 ? "ERROR" : "NOT_FOUND";
+      return hasUnknown || hasNon404 ? "UNKNOWN" : "NOT_FOUND";
     })(),
     code: (() => {
       const firstNon404 = errors.find(e => e.status && e.status !== 404 && e.status !== 401 && e.status !== 403);
       const hasUnknown = errors.some(e => e.status == null);
       return firstNon404?.status ?? (hasUnknown ? 500 : 404);
     })(),
-    metaData: { errors }
+    }
   };
 
   // Return the final document object
   return {
     name: "gdoc.read",
     success: true,
-    result: documents,
-    code: 200,
-    metaData: { size: JSON.stringify(documents).length }
+    result: {
+      size: JSON.stringify(documents).length,
+      documents: documents
+    }
   };
 
 }
 
 // Extracts document IDs from a message if they exist
-gdoc.extractIds = function(content: string) {
+gdoc.extractIds = function(content) {
   const docIds: string[] = [];
   const ids = content.split("https://docs.google.com/document/d/");
   if (!ids?.length) return [];

@@ -171,7 +171,6 @@ server.readAndUpdate = async function (guildId: string) {
         v.attributes.server_value
       ])
     );
-    await fs.writeFile(`./info_logs/startupVars.json`, JSON.stringify(serverStartup.data.data, null, 2));
     const serverJar = startupVars.SERVER_JARFILE ?? null;
     const minecraftVersion =
       startupVars.MINECRAFT_VERSION ??

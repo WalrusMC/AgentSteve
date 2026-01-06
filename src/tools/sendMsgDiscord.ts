@@ -1,4 +1,4 @@
-import { logAmount } from "../../devVariables.js";
+import { logAmount } from "../devVariables.js";
 import path from "path";
 import { fileURLToPath } from 'url';
 import { createLogger } from "../utils/logger.js";

@@ -61,7 +61,7 @@ BEHAVIOR RULES
  * Sends the user message and context to the selected model and executes any tool calls.
  * Falls back to Discord response on errors.
  */
-export async function moderate(info: AgentInfo, toolHistory: ToolResult[] = []): Promise<ResponderResponse> {
+export async function moderate(info: AgentInfo, toolHistory: ToolResult<any, any>[] = []): Promise<ResponderResponse> {
   const { message } = info; // {Object}
   const { pastChats } = info; // [Array]
   //const summary = info.summary ?? ""; // "String"
@@ -302,7 +302,7 @@ export async function moderate(info: AgentInfo, toolHistory: ToolResult[] = []):
   const toolCall = (response as any).output.find?.((c: any) => c.type === "function_call" || c.type === "tool_call");
   if (toolCall) {
     const args = JSON.parse(toolCall.arguments);
-    let toolResult: ToolResult;
+    let toolResult;
     switch (toolCall.name) {
       case "respond":
         return {
@@ -331,8 +331,23 @@ export async function moderate(info: AgentInfo, toolHistory: ToolResult[] = []):
         };
       case "readDoc":
         // TO DO: Add summarizer for really big documents.
+        // TO DO: Fix tool results for document reading capabilities!!!!
         toolResult = await gdoc.read(false, message, args.ids);
-        switch (toolResult.result) {
+        if (toolResult.success) {
+          // TO DO: Improve the toolResult system (toolResult.result)
+          if (toolResult.result.size > 20000) {
+            toolHistory.push({
+              name: "readDoc",
+              success: false,
+              error: `The requested document/documents (${args.ids}) was/were too big. Documents should be a maximum of ~15,000.`
+            });
+            return await moderate(info, toolHistory);
+          } else {
+            toolHistory.push({ name: toolCall.name, success: true, result: toolResult.result.documents});
+            return await moderate(info, toolHistory);
+          }
+        }
+        switch (toolResult.error.reason) {
           case "NO_AUTH":
           case "FORBIDDEN":
             return {
@@ -344,43 +359,24 @@ export async function moderate(info: AgentInfo, toolHistory: ToolResult[] = []):
             toolHistory.push({
               name: "readDoc",
               success: false,
-              result: `The requested document/documents (${args.ids}) could not be accessed (missing permission, or broken link).`,
-              code: 404
+              error: `The requested document/documents (${args.ids}) could not be accessed (missing permission, or broken link). Do not try to access that/those document/documents again.`
             });
             return await moderate(info, toolHistory);
-          case "ERROR":
+          case "UNKNOWN":
             toolHistory.push({
               name: "readDoc",
               success: false,
-              result: `Failed to read the requested document/documents (${args.ids}) due to a Google API/auth error.`,
-              code: toolResult.code ?? 500,
-              metaData: toolResult.metaData
+              error: `Failed to read the requested document/documents (${args.ids}) due to a Google API/auth error. Do not try this tool again.`
             });
             return await moderate(info, toolHistory);
           default:
-            if (toolResult.success) {
-              // TO DO: Improve the toolResult system (toolResult.result)
-              if (toolResult.metaData.size > 20000) {
-                toolHistory.push({
-                  name: "readDoc",
-                  success: false,
-                  result: `The requested document/documents (${args.ids}) was/were too big. Documents should be a maximum of ~15,000.`,
-                  code: 400
-                });
-                return await moderate(info, toolHistory);
-              } else {
-                toolHistory.push({ ...toolResult, name: toolCall.name});
-                return await moderate(info, toolHistory);
-              }
-            } else {
-              log.error("gdoc.read() returned invalid data.");
-              return {
-                messages: await sendMsgDiscord("Oh no! An error has occured.", message),
-                isClarification: false,
-                responder: "moderate"
-              };
-            }
-        }
+            log.error("gdoc.read() returned invalid data.");
+            return {
+              messages: await sendMsgDiscord("Oh no! An error has occured.", message),
+              isClarification: false,
+              responder: "moderate"
+            };
+          }
       default:
         log.error("GPT did not call a valid tool.");
         return {

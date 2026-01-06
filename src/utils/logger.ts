@@ -1,5 +1,4 @@
-import { logAmount, logResponse } from "../../devVariables.js";
-
+import { logAmount, logResponse } from "../devVariables.js"
 // Creates a simple, shared logger with scoped labels and level filtering.
 // Levels:
 // - 0: errors/warnings only

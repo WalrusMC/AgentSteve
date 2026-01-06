@@ -34,7 +34,7 @@ export async function coder(
   model: string,
   info: AgentInfo,
   data?: string,
-): Promise<ToolResult> {
+): Promise<ToolResult<`${string}.jar`, string>> {
   const { message } = info;
   const { pastChats } = info;
   const guildId = message.guildId;
@@ -94,7 +94,7 @@ export async function coder(
           properties: {
             pluginDescription: {
               type: "string",
-              description: "Optional. A new 1-5 sentence description of the plugin. If this is ommitted, the original description will be used.",
+              description: "Optional. An updated 1-5 sentence description of the entire plugin. If this is ommitted, the original description will be used.",
             },
             deletions: {
               type: "array",
@@ -153,6 +153,8 @@ export async function coder(
     description: string,
     parameters: object
   };
+
+  let dataResult;
   switch (job) {
     case "createNewPlugin":
       developerPrompt = `Your job is to create a new Paper 1.20.1 Minecraft plugin called ${pluginName} from the user prompt by calling 
@@ -161,7 +163,10 @@ export async function coder(
       tool = toolsArray[0];
       break;
     case "editPlugin":
-      data = await plugin.retrieveCode(pluginName, ["pluginJava", "pluginYML", "configYML"], guildId).result;
+      dataResult = await plugin.retrieveCode(pluginName, ["pluginJava", "pluginYML", "configYML"], guildId)
+      if (dataResult.success) {
+        data = JSON.stringify(dataResult.result);
+      }
       developerPrompt = `Your job is to edit a Paper 1.20.1 Minecraft plugin called ${pluginName} to fufill the user request by calling 
       using the **editPlugin** tool. You may use your assistant message to understand the user intent and your past chats to 
       understand the context of the current user message.
@@ -174,7 +179,7 @@ export async function coder(
         - What minimal changes are needed?
 
       The plugin code is represented by an array of objects [{ line: number, content: string }]
-      Here is the plugin code:
+      Here is the plugin code and information:
       ${data}`;
       tool = toolsArray[1];
       break;
@@ -183,6 +188,8 @@ export async function coder(
       You may use the user prompt and assistant message to understand the context of the plugin.
       Maven crashed while trying to build this plugin into a JAR. 
       Call the **editPlugin** tool to fix the plugin.
+
+      Here is the plugin information and crash report:
       ${data}`;
       tool = toolsArray[1];
       break;
@@ -202,7 +209,20 @@ export async function coder(
   const attachmentNames = message?.attachments?.size 
   ? Array.from(message.attachments.values()).map(a => a.name ?? "").filter(Boolean).join(",")
   : "";
-  const userInput = `(PAST CHATS)\n${pastChats}\n(CURRENT USER MESSAGE)UTC_TIME:${message.createdAt.toISOString()}|ROLE:ADMINISTRATOR|USERNMAME:${message.author.username}|USER_ID:${message.author.id}|CHAT:${message.content}${attachmentNames ? `|ATTACHMENTS:${attachmentNames}` : ""}\n`;
+  const currentUserMessage = {
+    time: message.createdAt.toISOString(),
+    author: {
+      id: message.author.id,
+      username: message.author.username,
+      isAdministrator: true
+    },
+    content: message.content,
+    attachments: attachmentNames,
+  };
+  const userInput = JSON.stringify({
+    pastChats: pastChats,
+    currentUserMessage: currentUserMessage
+  }, null, 2);
 
   // Send request to OpenAI API
   log.response("OPENAI INPUT (CODER)", `|SYSTEM|\n${systemPrompt}\n|DEVELOPER|\n${developerPrompt}\n|USER|\n${userInput}\n|ASSISTANT|\n${JSON.stringify(assistantMessage, null, 2)}`);
@@ -222,31 +242,48 @@ export async function coder(
   const toolCall = (response as any).output.find?.((c: any) => c.type === "function_call" || c.type === "tool_call");
   if (toolCall) {
     const args = JSON.parse(toolCall.arguments);
-    let toolResult: ToolResult;
+    let toolResult;
     switch (toolCall.name) {
       case "createNewPlugin":
         toolResult = await plugin.createNew(pluginName, args.pluginDescription, args.pluginJava, args.pluginYML, args?.configYML, args?.dependencies, guildId);
-        if (toolResult.success || toolResult.code === 409) {
-          return toolResult; // Success || Plugin with name already exists
-        } else {
+        if (toolResult.success) {
+          return toolResult; // Success
+        } else if(toolResult.error.code === "ALREADY_EXISTS") {
+          return {
+            name: "createNewPlugin",
+            success: false,
+            error: "The new plugin you tried to create already exists. If you wish to edit a pre-existing plugin, you must call the editPlugin tool, not the createNewPlugin tool."
+          }
+        } else if(toolResult.error.code === "CRASH") {
           // TO DO: Improve the toolResult system (toolResult.result)
-          return coder("fixCrash", pluginName, assistantMessage, models.coder.high.slow, info, await plugin.crashReport(pluginName, toolResult.result.version, toolResult.result.code, toolResult.result.error, guildId).result);
+          return coder("fixCrash", pluginName, assistantMessage, models.coder.high.slow, info, toolResult.error.information);
+        } else {
+          return {
+            name: "createNewPlugin",
+            success: false,
+            error: "A critical error has occurred."
+          }
         }
       case "editPlugin":
         toolResult = await plugin.edit(pluginName, args?.pluginDescription, args?.deletions, args?.insertions, args?.addDependencies, args?.removeDependencies, guildId);
         if (toolResult.success) {
           return toolResult;
-        } else {
+        } else if(toolResult.error.code === "CRASH") {
           // TO DO: Improve the toolResult system (toolResult.result)
-          return coder("fixCrash", pluginName, assistantMessage, models.coder.high.slow, info, await plugin.crashReport(pluginName, toolResult.result.version, toolResult.result.code, toolResult.result.error, guildId).result);
+          return coder("fixCrash", pluginName, assistantMessage, models.coder.high.slow, info, toolResult.error.information);
+        } else {
+          return {
+            name: "editPlugin",
+            success: false,
+            error: "A critical error has occurred."
+          }
         }
       default:
         log.error("GPT did not call a valid tool.");
         return {
           name: job,
           success: false,
-          result: "An internal error has occurred.",
-          code: 500
+          error: "An internal error has occurred."
         };
     }
   } else {
@@ -254,8 +291,7 @@ export async function coder(
     return {
       name: job,
       success: false,
-      result: "An internal error has occurred.",
-      code: 500
+      error: "An internal error has occurred."
     };
   }
 
