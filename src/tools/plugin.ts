@@ -1,5 +1,4 @@
-import { exec } from "child_process";
-import { promisify } from "util";
+import { spawn } from "child_process";
 import fs from "fs/promises";
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -18,7 +17,7 @@ interface Plugin {
     configYML?: string,
     dependencies?: string[],
     guildId?: string,
-  ): Promise<ToolResult<`${string}.jar`, { information: string; code: PluginCodes }>>;
+  ): Promise<ToolResult<PluginDB, { information: string; code: PluginCodes }>>;
   edit(
     pluginName: string,
     pluginDescription: string,
@@ -27,40 +26,44 @@ interface Plugin {
     addDependencies: string[],
     removeDependencies: Array<string | number>,
     guildId?: string,
-  ): Promise<ToolResult<`${string}.jar`, { information: string, code: PluginCodes }>>;
+  ): Promise<ToolResult<PluginDB, { information: string, code: PluginCodes }>>;
   retrieveCode(
     pluginName: string, 
     files: string[], 
     guildId: string
   ): Promise<ToolResult<{ name: string, description: string, code: CodeLines }, string>>;
-}
+};
 type CodeLine = {
   line: number,
   text: string
-}
+};
 type Dependency = {
   dependency: number,
   block: string
-}
+};
 type CodeLines = {
   pluginJava?: CodeLine[],
   pluginYML?: CodeLine[],
   configYML?: CodeLine[],
   dependencies?: Dependency[]
-}
+};
 type CodeStrings = {
   pluginJava?: string,
   pluginYML?: string,
   configYML?: string,
   dependencies?: Dependency[]
-}
+};
 type PluginCodes = "CRASH" | "ALREADY_EXISTS" | "UNKOWN";
+export type PluginDB = {
+  name: string,
+  version: string,
+  description: string,
+  file: `${string}.jar`
+};
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const log = createLogger("plugin");
-
-const run = promisify(exec);
 
 export const plugin: Plugin = {} as Plugin;
 
@@ -110,6 +113,40 @@ const applyTextChanges = (
     });
 
   return lines.join("\n");
+};
+
+const appendCapped = (existing: string, chunk: Buffer, cap: number) => {
+  const next = existing + chunk.toString("utf8");
+  return next.length > cap ? next.slice(next.length - cap) : next;
+};
+
+const runMavenBuild = async (cwd: string) => {
+  const outputCap = 2_000_000;
+  return await new Promise<{ stdout: string; stderr: string }>((resolve, reject) => {
+    const child = spawn("mvn", ["-f", "pom.xml", "-B", "clean", "package"], {
+      cwd,
+      shell: true,
+    });
+
+    let stdout = "";
+    let stderr = "";
+
+    child.stdout?.on("data", (data: Buffer) => {
+      stdout = appendCapped(stdout, data, outputCap);
+    });
+    child.stderr?.on("data", (data: Buffer) => {
+      stderr = appendCapped(stderr, data, outputCap);
+    });
+
+    child.on("error", (err) => reject(err));
+    child.on("close", (code) => {
+      if (code === 0) {
+        resolve({ stdout, stderr });
+        return;
+      }
+      reject({ code, stdout, stderr });
+    });
+  });
 };
 
 // Converts strings to arrays of lines.
@@ -251,7 +288,7 @@ async function buildJAR(
     await fs.writeFile(pomPath, pomXML);
 
     log.info(`Building plugin ${pluginName}-${pluginVersion}.jar`);
-    await run("mvn -f pom.xml clean package", { cwd: builderRoot });
+    await runMavenBuild(builderRoot);
 
     const targetDir = path.join(builderRoot, "target");
     const files = await fs.readdir(targetDir);
@@ -403,19 +440,31 @@ plugin.createNew = async function(
   }
 
   // Build JAR
-  const result = { ...await buildJAR(pluginName, "1.0.0", pluginJava, pluginYML, configYML, pomXML, guildId, dependencyBlocks), name: "plugin.createNew" };
+  const result = await buildJAR(pluginName, "1.0.0", pluginJava, pluginYML, configYML, pomXML, guildId, dependencyBlocks);
   if (result.success) {
     log.debug("Success! Writing plugin information to database");
     pluginsDb.push({
       name: pluginName,
-      pluginName,
       version: "1.0.0",
       description: pluginDescription,
+      file: result.result
     });
 
     await fs.writeFile(pluginsDbPath, JSON.stringify(pluginsDb, null, 2));
+
+    return {
+      name: "createNewPlugin",
+      success: true,
+      result: {
+        name: pluginName,
+        version: "1.0.0",
+        description: pluginDescription,
+        file: result.result
+      }
+    };
+  } else {
+    return result;
   }
-  return result;
 }
 
 /**
@@ -576,10 +625,11 @@ plugin.edit = async function(
   await github.writeFile(pluginName, "pom.xml", pomXML, `Update pom.xml to ${pluginVersion}`, guildId);
   await github.writeFile(pluginName, "dependencies.json", JSON.stringify(dependencies, null, 2), "Update dependencies list", guildId);
 
-  const pluginRecord = {
+  const pluginRecord: PluginDB = {
     name: pluginName,
     version: pluginVersion,
-    description: pluginDescription
+    description: pluginDescription,
+    file: `${pluginName}-${pluginVersion}.jar`
   };
   const pluginIndex = pluginsDb.findIndex(matchesPlugin);
   if (pluginIndex === -1) {
@@ -587,9 +637,28 @@ plugin.edit = async function(
   } else {
     pluginsDb[pluginIndex] = pluginRecord;
   }
-  await fs.writeFile(pluginsDbPath, JSON.stringify(pluginsDb, null, 2));
 
-  return { ...await buildJAR(pluginName, pluginVersion, pluginJava, pluginYML, configYML, pomXML, guildId, dependencies), name: "plugin.edit"};
+  const result = await buildJAR(pluginName, pluginVersion, pluginJava, pluginYML, configYML, pomXML, guildId, dependencies);
+
+  if (result.success) {
+    log.debug("Success! Writing plugin information to database");
+    const pluginIndex = pluginsDb.findIndex(matchesPlugin);
+    if (pluginIndex === -1) {
+      pluginsDb.push(pluginRecord);
+    } else {
+      pluginsDb[pluginIndex] = pluginRecord;
+    }
+
+    await fs.writeFile(pluginsDbPath, JSON.stringify(pluginsDb, null, 2));
+
+    return {
+      name: "createNewPlugin",
+      success: true,
+      result: pluginRecord
+    };
+  } else {
+    return result;
+  }
 
 }
 /**

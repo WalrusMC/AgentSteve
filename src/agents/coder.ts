@@ -3,6 +3,7 @@ import { createLogger } from "../utils/logger.js";
 import { plugin } from "../tools/plugin.js";
 import { models } from "../models.js";
 import type { AgentInfo, ToolResult } from "../types.js";
+import type { PluginDB } from "../tools/plugin.js";
 
 const client = new OpenAI;
 const log = createLogger("coder");
@@ -34,7 +35,7 @@ export async function coder(
   model: string,
   info: AgentInfo,
   data?: string,
-): Promise<ToolResult<`${string}.jar`, string>> {
+): Promise<ToolResult<PluginDB, string>> {
   const { message } = info;
   const { pastChats } = info;
   const guildId = message.guildId;

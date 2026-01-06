@@ -61,7 +61,7 @@ BEHAVIOR RULES
  * Sends the user message and context to the selected model and executes any tool calls.
  * Falls back to Discord response on errors.
  */
-export async function moderate(info: AgentInfo, toolHistory: ToolResult<any, any>[] = []): Promise<ResponderResponse> {
+export async function moderate(info: AgentInfo, toolHistory: ToolResult<any, any>[] = [], devOverride?: string | false): Promise<ResponderResponse> {
   const { message } = info; // {Object}
   const { pastChats } = info; // [Array]
   //const summary = info.summary ?? ""; // "String"
@@ -94,7 +94,7 @@ export async function moderate(info: AgentInfo, toolHistory: ToolResult<any, any
   }, null, 2);
 
   // Dev Input
-  const devInput = JSON.stringify({
+  const devInput = !devOverride ? JSON.stringify({
     instructions: developerPrompt,
     information: {
       plugins: {
@@ -110,12 +110,16 @@ export async function moderate(info: AgentInfo, toolHistory: ToolResult<any, any
         content: servers
       }
     }
-  }, null, 2);
+  }, null, 2) : devOverride;
 
   // Assistant Input
   const assistantInput = JSON.stringify({
     //memorySummary: summary,
-    toolHistory: toolHistory
+
+    toolHistory: {
+      noteToSelf: "These are tools I just called to answer the current user request and their results.",
+      ...toolHistory
+    }
   }, null, 2);
 
   // Tools
@@ -315,13 +319,13 @@ export async function moderate(info: AgentInfo, toolHistory: ToolResult<any, any
         toolResult = await coder(toolCall.name, args.pluginName, args.assistantMessage, args.complex ? models.coder.high.slow : models.coder.medium.slow, info);
         if (toolResult.success) {
           // TO DO: Improve the toolResult system (toolResult.result)
-          downloads[toolResult.result] = "A Minecraft plugin JAR.";
+          downloads[toolResult.result.file] = "A Minecraft plugin JAR.";
           await fs.writeFile(`./db/${message.guildId}/downloads.json`, JSON.stringify(downloads, null, 2));
           toolHistory.push({ ...toolResult, name: toolCall.name});
-          return await moderate(info, toolHistory);
+          return await moderate(info, toolHistory, devInput);
         } else {
           toolHistory.push({ ...toolResult, name: toolCall.name});
-          return await moderate(info, toolHistory);
+          return await moderate(info, toolHistory, devInput);
         }
       case "clarify":
         return {
@@ -341,10 +345,10 @@ export async function moderate(info: AgentInfo, toolHistory: ToolResult<any, any
               success: false,
               error: `The requested document/documents (${args.ids}) was/were too big. Documents should be a maximum of ~15,000.`
             });
-            return await moderate(info, toolHistory);
+            return await moderate(info, toolHistory, devInput);
           } else {
             toolHistory.push({ name: toolCall.name, success: true, result: toolResult.result.documents});
-            return await moderate(info, toolHistory);
+            return await moderate(info, toolHistory, devInput);
           }
         }
         switch (toolResult.error.reason) {
@@ -361,14 +365,14 @@ export async function moderate(info: AgentInfo, toolHistory: ToolResult<any, any
               success: false,
               error: `The requested document/documents (${args.ids}) could not be accessed (missing permission, or broken link). Do not try to access that/those document/documents again.`
             });
-            return await moderate(info, toolHistory);
+            return await moderate(info, toolHistory, devInput);
           case "UNKNOWN":
             toolHistory.push({
               name: "readDoc",
               success: false,
               error: `Failed to read the requested document/documents (${args.ids}) due to a Google API/auth error. Do not try this tool again.`
             });
-            return await moderate(info, toolHistory);
+            return await moderate(info, toolHistory, devInput);
           default:
             log.error("gdoc.read() returned invalid data.");
             return {
