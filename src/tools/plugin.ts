@@ -18,7 +18,7 @@ interface Plugin {
     configYML?: string,
     dependencies?: string[],
     guildId?: string,
-  ): Promise<ToolResult<`${string}.jar`, { information: string; code: PluginCodes }>>;
+  ): Promise<ToolResult<PluginDB, { information: string; code: PluginCodes }>>;
   edit(
     pluginName: string,
     pluginDescription: string,
@@ -27,34 +27,40 @@ interface Plugin {
     addDependencies: string[],
     removeDependencies: Array<string | number>,
     guildId?: string,
-  ): Promise<ToolResult<`${string}.jar`, { information: string, code: PluginCodes }>>;
+  ): Promise<ToolResult<PluginDB, { information: string, code: PluginCodes }>>;
   retrieveCode(
     pluginName: string, 
     files: string[], 
     guildId: string
   ): Promise<ToolResult<{ name: string, description: string, code: CodeLines }, string>>;
-}
+};
 type CodeLine = {
   line: number,
   text: string
-}
+};
 type Dependency = {
   dependency: number,
   block: string
-}
+};
 type CodeLines = {
   pluginJava?: CodeLine[],
   pluginYML?: CodeLine[],
   configYML?: CodeLine[],
   dependencies?: Dependency[]
-}
+};
 type CodeStrings = {
   pluginJava?: string,
   pluginYML?: string,
   configYML?: string,
   dependencies?: Dependency[]
-}
+};
 type PluginCodes = "CRASH" | "ALREADY_EXISTS" | "UNKOWN";
+type PluginDB = {
+  name: string,
+  version: string,
+  description: string,
+  file: `${string}.jar`
+};
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -403,19 +409,31 @@ plugin.createNew = async function(
   }
 
   // Build JAR
-  const result = { ...await buildJAR(pluginName, "1.0.0", pluginJava, pluginYML, configYML, pomXML, guildId, dependencyBlocks), name: "plugin.createNew" };
+  const result = await buildJAR(pluginName, "1.0.0", pluginJava, pluginYML, configYML, pomXML, guildId, dependencyBlocks);
   if (result.success) {
     log.debug("Success! Writing plugin information to database");
     pluginsDb.push({
       name: pluginName,
-      pluginName,
       version: "1.0.0",
       description: pluginDescription,
+      file: result.result
     });
 
     await fs.writeFile(pluginsDbPath, JSON.stringify(pluginsDb, null, 2));
+
+    return {
+      name: "createNewPlugin",
+      success: true,
+      result: {
+        name: pluginName,
+        version: "1.0.0",
+        description: pluginDescription,
+        file: result.result
+      }
+    };
+  } else {
+    return result;
   }
-  return result;
 }
 
 /**
@@ -576,10 +594,11 @@ plugin.edit = async function(
   await github.writeFile(pluginName, "pom.xml", pomXML, `Update pom.xml to ${pluginVersion}`, guildId);
   await github.writeFile(pluginName, "dependencies.json", JSON.stringify(dependencies, null, 2), "Update dependencies list", guildId);
 
-  const pluginRecord = {
+  const pluginRecord: PluginDB = {
     name: pluginName,
     version: pluginVersion,
-    description: pluginDescription
+    description: pluginDescription,
+    file: `${pluginName}-${pluginVersion}.jar`
   };
   const pluginIndex = pluginsDb.findIndex(matchesPlugin);
   if (pluginIndex === -1) {
@@ -587,9 +606,28 @@ plugin.edit = async function(
   } else {
     pluginsDb[pluginIndex] = pluginRecord;
   }
-  await fs.writeFile(pluginsDbPath, JSON.stringify(pluginsDb, null, 2));
 
-  return { ...await buildJAR(pluginName, pluginVersion, pluginJava, pluginYML, configYML, pomXML, guildId, dependencies), name: "plugin.edit"};
+  const result = await buildJAR(pluginName, pluginVersion, pluginJava, pluginYML, configYML, pomXML, guildId, dependencies);
+
+  if (result.success) {
+    log.debug("Success! Writing plugin information to database");
+    const pluginIndex = pluginsDb.findIndex(matchesPlugin);
+    if (pluginIndex === -1) {
+      pluginsDb.push(pluginRecord);
+    } else {
+      pluginsDb[pluginIndex] = pluginRecord;
+    }
+
+    await fs.writeFile(pluginsDbPath, JSON.stringify(pluginsDb, null, 2));
+
+    return {
+      name: "createNewPlugin",
+      success: true,
+      result: pluginRecord
+    };
+  } else {
+    return result;
+  }
 
 }
 /**
