@@ -1,0 +1,55 @@
+// https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client"
+  output   = "../generated/prisma"
+}
+
+datasource db {
+  provider = "sqlite"
+}
+
+model Guild {
+  id String @id
+  downloads Download[]
+  plugins Plugin[]
+  servers Server[]
+  users User[]
+}
+
+model Download {
+  id Int @id @default(autoincrement())
+  file String
+  description String
+
+  guild Guild @relation(fields: [guildId], references: [id])
+  guildId String
+}
+
+model Plugin {
+  id Int @id @default(autoincrement())
+  name String
+  version String
+  description String
+  file String
+
+  guild Guild @relation(fields: [guildId], references: [id])
+  guildId String
+}
+
+model Server {
+  id String @id
+  information Json
+
+  guild Guild @relation(fields: [guildId], references: [id])
+  guildId String
+}
+
+model User {
+  id Int @id
+  token Json
+
+  guild Guild @relation(fields: [guildId], references: [id])
+  guildId String
+}
+

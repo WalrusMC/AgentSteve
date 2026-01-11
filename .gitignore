@@ -6,3 +6,4 @@ google-key-file.json
 devVariables.js
 dist/
 dev-logs/
+/generated/prisma
