@@ -16,6 +16,7 @@ export type CustomMessage = {
 export type PastChats = CustomMessage[];
 
 export type AgentInfo = {
+  guildId: string
   message: Message;
   pastChats: PastChats;
   //summary: string;

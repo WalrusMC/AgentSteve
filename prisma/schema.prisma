@@ -11,6 +11,7 @@ datasource db {
 
 model Guild {
   id String @id
+  name String
   downloads Download[]
   plugins Plugin[]
   servers Server[]

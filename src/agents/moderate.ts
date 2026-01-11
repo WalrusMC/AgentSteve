@@ -1,5 +1,4 @@
 import OpenAI from "openai";
-import fs from "fs/promises";
 import { sendMsgDiscord } from "../tools/sendMsgDiscord.js";
 import { coder } from "./coder.js"
 import { createLogger } from "../utils/logger.js";
@@ -7,6 +6,7 @@ import { gdoc } from "../tools/google.js";
 import { models } from "../models.js";
 import { server } from "../tools/server.js";
 import type { AgentInfo, ResponderResponse, ToolResult } from "../types.js";
+import { prisma } from "../../lib/prisma.js";
 const client = new OpenAI;
 const log = createLogger("moderate");
 
@@ -62,11 +62,30 @@ BEHAVIOR RULES
  * Falls back to Discord response on errors.
  */
 export async function moderate(info: AgentInfo, toolHistory: ToolResult<any, any>[] = [], devOverride?: string | false): Promise<ResponderResponse> {
-  const { message } = info; // {Object}
-  const { pastChats } = info; // [Array]
-  //const summary = info.summary ?? ""; // "String"
-  const downloads = JSON.parse(await fs.readFile(`./db/${message.guildId}/downloads.json`, "utf-8")); // {Object}
-  const plugins = JSON.parse(await fs.readFile(`./db/${message.guildId}/plugins.json`, "utf-8")); // [Array]
+  const { message } = info;
+  const { pastChats } = info;
+
+  // Downloads
+  const downloads = (await prisma.download.findMany({
+    where: {
+      guildId: info.guildId
+    }
+  })).map(download => {
+    const { id, guildId, ...rest} = download;
+    return rest;
+  })
+
+  // Plugins
+  const plugins = (await prisma.plugin.findMany({
+    where: {
+      guildId: info.guildId
+    }
+  })).map(download => {
+    const { id, guildId, ...rest} = download;
+    return rest;
+  });
+
+  // Servers
   const servers = await server.readAndUpdate(message.guildId) // {Object}
   
   log.debug("Moderate started for message", message.id);
@@ -140,7 +159,7 @@ export async function moderate(info: AgentInfo, toolHistory: ToolResult<any, any
             description: "Optional. An array of any files that need to be sent to the user.",
             items: { 
               type: "string",
-              enum: Object.keys(downloads),
+              enum: downloads.map(download => download.file),
               description: "The name of the file you wish to send."
             },
           },
@@ -209,7 +228,7 @@ export async function moderate(info: AgentInfo, toolHistory: ToolResult<any, any
           pluginName: {
             type: "string",
             description: "The name of the plugin.",
-            enum: plugins.map((obj: any) => obj.name),
+            enum: plugins.map(plugin => plugin.name),
           },
           assistantMessage: {
             type: "object",
@@ -319,8 +338,6 @@ export async function moderate(info: AgentInfo, toolHistory: ToolResult<any, any
         toolResult = await coder(toolCall.name, args.pluginName, args.assistantMessage, args.complex ? models.coder.high.slow : models.coder.medium.slow, info);
         if (toolResult.success) {
           // TO DO: Improve the toolResult system (toolResult.result)
-          downloads[toolResult.result.file] = "A Minecraft plugin JAR.";
-          await fs.writeFile(`./db/${message.guildId}/downloads.json`, JSON.stringify(downloads, null, 2));
           toolHistory.push({ ...toolResult, name: toolCall.name});
           return await moderate(info, toolHistory, devInput);
         } else {

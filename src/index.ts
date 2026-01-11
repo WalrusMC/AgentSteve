@@ -2,7 +2,6 @@ import "dotenv/config";
 import { Client, GatewayIntentBits, PermissionsBitField, MessageFlags, Message } from "discord.js";
 import { router } from "./router.js";
 //import { summarizer } from "./agents/summarizer.js";
-import fs from "fs/promises";
 import path from "path";
 import { createLogger } from "./utils/logger.js";
 import { isUserAllowed, allowUser, allowRole, disallowUser, disallowRole } from "./utils/whitelist.js"; // Move from role and user-based permissions to server administrator-based perms
@@ -10,6 +9,8 @@ import { ensureDBs } from "./utils/ensureDBs.js";
 import { moderate } from "./agents/moderate.js";
 import { getPastChats } from "./utils/getPastChats.js";
 import { gdoc } from "./tools/google.js";
+import { prisma } from "../lib/prisma.js";
+import fs from "fs/promises";
 
 import type { AgentInfo, ResponderResponse, ToolResult, ReadDocFail, ReadDocSuccess } from "./types.js";
 
@@ -60,15 +61,21 @@ client.once("clientReady", async (readyClient) => {
   // Ensure commands exist in all guilds the bot is currently in
   try {
     for (const g of readyClient.guilds.cache.values()) {
-      await ensureDBs(g.id);
+      await prisma.guild.upsert({
+        where: {
+          id: g.id,
+        },
+        update: {},
+        create: {
+          id: g.id,
+          name: g.name,
+        },
+      });
       await g.commands.set(commands);
     }
   } catch (e: unknown) {
     log.error("Failed to register commands or create databases on ready:", getErrorMessage(e));
   }
-
-  await fs.writeFile("./db/guilds.json", JSON.stringify(client.guilds.cache.map(guild => guild.id), null, 2));
-
 });
 
 /**
@@ -77,22 +84,20 @@ client.once("clientReady", async (readyClient) => {
  * Create databases
  */
 client.on("guildCreate", async guild => {
-  await ensureDBs(guild.id);
   await guild.commands.set(commands);
-  let guildIds = [];
-  try {
-    guildIds = JSON.parse(await fs.readFile("./db/guilds.json", "utf8"));
-  } catch {
-    guildIds = [];
-  }
 
-  if (!guildIds.includes(guild.id)) {
-    guildIds.push(guild.id);
-  }
+  await prisma.guild.upsert({
+    where: {
+      id: guild.id,
+    },
+    update: {},
+    create: {
+      id: guild.id,
+      name: guild.name,
+    },
+  });
 
-  await fs.writeFile("./db/guilds.json", JSON.stringify(guildIds, null, 2));
-
-  log.info(`Registered commands in guild ${guild.id}`);
+  log.info(`Registered commands and created databases for guild ${guild.id}`);
 });
 
 // Login
@@ -109,6 +114,7 @@ client.on("messageCreate", async (message) => {
   if (currentlyRunning[`${message.guildId}`]) return await message.reply("Slow down there! I can only answer one question at a time.");
 
   const info: AgentInfo = {
+    guildId: message.guildId,
     message,
     pastChats: await getPastChats(message, 2100)
   }
@@ -138,12 +144,6 @@ client.on("messageCreate", async (message) => {
         const storedDir = path.join(process.cwd(), "src", "tools", "downloads", message.guildId);
         try { await fs.mkdir(storedDir, { recursive: true }); } catch {}
 
-        const downloadsIndexPath = path.join(process.cwd(), "db", message.guildId, "downloads.json");
-        let downloadsIndex: Record<string, string> = {};
-        try {
-          downloadsIndex = JSON.parse(await fs.readFile(downloadsIndexPath, "utf8"));
-        } catch {}
-
         const getUniqueName = async (dir: string, baseName: string) => {
           const safe = baseName.replace(/[\\/]/g, "_");
           let attempt = 0;
@@ -171,13 +171,18 @@ client.on("messageCreate", async (message) => {
             const buffer = Buffer.from(arrayBuffer);
             const fileName = await getUniqueName(storedDir, att.name || "upload");
             await fs.writeFile(path.join(storedDir, fileName), buffer);
-            downloadsIndex[fileName] = `User-uploaded file from @${message.author.username} (${message.author.id}) at ${new Date().toISOString()}`;
+            await prisma.download.create({
+              data: {
+                file: fileName,
+                description: `User-uploaded file from @${message.author.username} (${message.author.id}) at ${new Date().toISOString()}`,
+                guildId: message.guildId
+              }
+            });
             log.info(`Saved attachment as ${fileName}`);
           } catch (err: unknown) {
             log.error("Failed to save attachment:", getErrorMessage(err));
           }
         }
-        await fs.writeFile(downloadsIndexPath, JSON.stringify(downloadsIndex, null, 2));
       }
     } catch (err: unknown) {
       log.error("Attachment handling failed:", getErrorMessage(err));

@@ -4,6 +4,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { createLogger } from "../utils/logger.js";
 import { github } from "../utils/github.js";
+import { prisma } from "../../lib/prisma.js";
 
 import type { ToolResult } from "../types.ts";
 
@@ -449,6 +450,13 @@ plugin.createNew = async function(
       description: pluginDescription,
       file: result.result
     });
+    prisma.download.create({
+      data: {
+        file: result.result,
+        description: "A Minecraft plugin JAR created by you, Steve.",
+        guildId
+      }
+    })
 
     await fs.writeFile(pluginsDbPath, JSON.stringify(pluginsDb, null, 2));
 
