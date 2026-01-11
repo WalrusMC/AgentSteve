@@ -7,3 +7,4 @@ devVariables.js
 dist/
 dev-logs/
 /generated/prisma
+dev.db
