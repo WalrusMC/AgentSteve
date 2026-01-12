@@ -1,6 +1,7 @@
 import fs from "fs/promises";
 import { google } from "googleapis";
 import { createLogger } from "../../utils/logger.js";
+import { prisma } from "../../../lib/prisma.js";
 
 const log = createLogger();
 
@@ -15,8 +16,8 @@ const oauth2Client = new google.auth.OAuth2(
 export async function googleOAuth(req: any, res: any) {
   try {
     const token = req.body?.token;
-    const guild = req.body?.guild;
-    const user = req.body?.user;
+    const guild: string = req.body?.guild;
+    const user: string = req.body?.user;
 
     // Require OAuth token and state data
     if (!token || !user || !guild) {
@@ -30,20 +31,22 @@ export async function googleOAuth(req: any, res: any) {
       return res.status(400).json({ error: "Missing token, user, or guild" });
     }
 
-    // Load existing users (if any)
-    let users: Record<string, any> = {};
-    try {
-      users = JSON.parse(await fs.readFile(`./db/${guild}/users.json`, "utf8"));
-    } catch {
-      log.error("The users.json file could not be found.")
-      return res.sendStatus(500);
-    }
-
     // Persist tokens under `tokens` for the requesting user (matches gdoc.read)
     const userId = String(user);
-    users[userId] = { ...(users[userId] || {}), tokens: token };
-
-    await fs.writeFile(`./db/${guild}/users.json`, JSON.stringify(users, null, 2));
+    await prisma.user.upsert({
+      where: {
+        guildId: guild,
+        id: user
+      },
+      create: {
+        guildId: guild,
+        id: user,
+        token: token
+      },
+      update: {
+        token: JSON.stringify(token)
+      }
+    });
 
     return res.sendStatus(204);
   } catch (err) {

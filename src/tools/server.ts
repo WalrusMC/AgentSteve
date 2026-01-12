@@ -1,8 +1,8 @@
 import "dotenv/config";
-import fs from "fs/promises";
 import fsp from "fs/promises";
 import axios from "axios";
 import { createLogger } from "../utils/logger.js";
+import { prisma } from "../../lib/prisma.js";
 
 const log = createLogger("Server Tool");
 
@@ -24,9 +24,13 @@ export const server: any = {};
 // Read accessible servers from ./db/${guildId}/servers.json
 const readServers = async (guildId: string) => {
   try {
-    return JSON.parse(await fsp.readFile(`./db/${guildId}/servers.json`, "utf8"));
+    return await prisma.server.findMany({
+      where: {
+        guildId
+      }
+    })
   } catch {
-    return {};
+    return [];
   }
 };
 
@@ -36,7 +40,7 @@ const readServers = async (guildId: string) => {
  */
 server.addNew = async function (guildId: string, serverId: string) {
   const servers = await readServers(guildId);
-  const serverIds = Object.keys(servers);
+  const serverIds = servers.map(obj => obj.id);
 
   let serverDetails: any;
   let serverStartup: any;
@@ -46,8 +50,12 @@ server.addNew = async function (guildId: string, serverId: string) {
   } catch (err: any) {
     const status = err?.response?.status;
     if (serverIds.includes(serverId)) {
-      delete servers[serverId];
-      await fsp.writeFile(`./db/${guildId}/servers.json`, JSON.stringify(servers, null, 2));
+      await prisma.server.delete({
+        where: {
+          guildId,
+          id: serverId
+        }
+      })
     }
     switch (status) {
       case 403:
@@ -104,26 +112,29 @@ server.addNew = async function (guildId: string, serverId: string) {
       null;
 
     // Add server to servers from servers.json
-    servers[serverId] = {
-      name: serverName,
-      description: serverDetails.data.attributes.description,
-      specs: {
-        memory: serverDetails.data.attributes.limits.memory,
-        disk: serverDetails.data.attributes.limits.disk,
-        cpu: serverDetails.data.attributes.limits.cpu
-      },
-      ip: serverDetails.data.attributes.relationships.allocations.data[0].ip,
-      ports: serverDetails.data.attributes.relationships.allocations.data.map((data: any) => ({
-        port: data.attributes.port,
-        notes: data.attributes.notes,
-        is_primary: data.attributes.is_default
-      })),
-      serverJar,
-      minecraftVersion
-    }
-
-    // Write to servers.json
-    await fsp.writeFile(`./db/${guildId}/servers.json`, JSON.stringify(servers, null, 2));
+    prisma.server.create({
+      data: {
+        information: JSON.stringify({
+          name: serverName,
+          description: serverDetails.data.attributes.description,
+          specs: {
+            memory: serverDetails.data.attributes.limits.memory,
+            disk: serverDetails.data.attributes.limits.disk,
+            cpu: serverDetails.data.attributes.limits.cpu
+          },
+          ip: serverDetails.data.attributes.relationships.allocations.data[0].ip,
+          ports: serverDetails.data.attributes.relationships.allocations.data.map((data: any) => ({
+            port: data.attributes.port,
+            notes: data.attributes.notes,
+            is_primary: data.attributes.is_default
+          })),
+          serverJar,
+          minecraftVersion
+        }, null, 2),
+        guildId,
+        id: serverId
+      }
+    })
 
     // Delete access file from remote server
     const data = await server.deleteFiles(guildId, serverId, "agentsteve.txt");
@@ -147,22 +158,31 @@ server.check = async function (guildId: string, serverId: string) {
 
 // Updates and returns servers.json
 server.readAndUpdate = async function (guildId: string) {
-  const servers = JSON.parse(await fsp.readFile(`./db/${guildId}/servers.json`, "utf8"));
+  const servers = await prisma.server.findMany({
+    where: {
+      guildId
+    }
+  })
 
-  for (const key of Object.keys(servers)) {
-    const serverId = key;
+  const serversArray = [];
+
+  for (const id of servers.map(obj => obj.id)) {
+
 
     let serverDetails: any;
     let serverStartup: any;
     try {
-      serverDetails = await api.get(`/servers/${serverId}/`);
-      serverStartup = await api.get(`/servers/${serverId}/startup`);
+      serverDetails = await api.get(`/servers/${id}/`);
+      serverStartup = await api.get(`/servers/${id}/startup`);
     } catch (err) {
-      delete servers[serverId];
+      await prisma.server.delete({
+        where: {
+          guildId,
+          id
+        }
+      })
       continue;
     }
-
-    const serverName = serverDetails?.data?.attributes?.name || servers?.[serverId]?.name || serverId;
 
     // Get server type and version
     const startupVars = Object.fromEntries(
@@ -177,9 +197,8 @@ server.readAndUpdate = async function (guildId: string) {
       startupVars.MC_VERSION ??
       null;
 
-    // Add server to servers from servers.json
-    servers[serverId] = {
-      name: serverName,
+    const updatedServerInfo = JSON.stringify({
+      name: serverDetails?.data?.attributes?.name,
       description: serverDetails.data.attributes.description,
       specs: {
         memory: serverDetails.data.attributes.limits.memory,
@@ -192,16 +211,25 @@ server.readAndUpdate = async function (guildId: string) {
         notes: data.attributes.notes,
         is_primary: data.attributes.is_default
       })),
-      serverJar, // Change
-      minecraftVersion // Change
-    }
-    // How we get version and server software type must be redesigned as those egg env vars do not exist. We must read the server.jar to figure out version and type
+      serverJar, // TODO: Change
+      minecraftVersion // TODO:  Change
+    }, null, 2);
+
+    // Update server
+    await prisma.server.update({
+      where: {
+        guildId,
+        id
+      },
+      data: {
+        information: updatedServerInfo
+      }
+    })
+    serversArray.push({id, information: updatedServerInfo})
+    // TODO: How we get version and server software type must be redesigned as those egg env vars do not exist. We must execute /version console command to get server version and software
   };
 
-  // Write to servers.json
-  await fsp.writeFile(`./db/${guildId}/servers.json`, JSON.stringify(servers, null, 2));
-
-  return servers;
+  return serversArray;
 }
 
 
@@ -345,6 +373,7 @@ server.writeFile = async function (guildId: string, serverId: string, file: stri
 }
 
 // Uploads sourceFile to targetPath
+// TODO: Uncompleted- needs to be completed
 server.uploadFile = async function (guildId: string, serverId: string, sourceFile: string, targetPath: string) {
   if (!(await server.check(guildId, serverId))) {
     return { success: false, result: "The target server does not exist or you do not have access to it.", code: 401 };
@@ -364,7 +393,7 @@ server.uploadFile = async function (guildId: string, serverId: string, sourceFil
 
   // Upload file to signed URL
   const formData: any = new (FormData as any)();
-  //formData.append('files', await fs.createReadStream(`./src/tools/downloads/${guildId}/${sourceFile}`));
+  //formData.append('files', await fs.createReadStream(`./src/tools/downloads/${guildId}/${sourceFile}`)); // TODO: Idk why this is commented or what it is needs to be completed
   formData.append('directory', targetPath);
 
   try {
@@ -394,9 +423,8 @@ server.downloadFile = async function (guildId: string, serverId: string, file: s
     return { success: false, result: "The target server does not exist or you do not have access to it.", code: 401 };
   }
 
-  let response;
   try {
-    response = await api.get(`/servers/${serverId}/files/download`, {
+    await api.get(`/servers/${serverId}/files/download`, {
       params: {
         file: file
       },
@@ -429,7 +457,7 @@ server.downloadFile = async function (guildId: string, serverId: string, file: s
   }
 
   try {
-    //response.data.pipe(fs.createWriteStream(`./src/tools/downloads/${guildId}/${removePath(file)}`));
+    //response.data.pipe(fs.createWriteStream(`./src/tools/downloads/${guildId}/${removePath(file)}`)); // TODO: Idk why this is commented or what it is needs to be completed
   } catch {
     return { success: false, result: `An internal error occured while trying to download the target file, ${file}.`, code: 500 }
   }
