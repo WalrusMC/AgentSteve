@@ -1,10 +1,10 @@
 import OpenAI from "openai";
-import fs from "fs/promises";
 import { sendMsgDiscord } from "../tools/sendMsgDiscord.js";
 import { createLogger } from "../utils/logger.js";
 import { moderate } from "./moderate.js";
 import { models } from "../models.js";
 import type { AgentInfo, ResponderResponse, ToolResult } from "../types.js";
+import { prisma } from "../../lib/prisma.js";
 
 const client = new OpenAI;
 const log = createLogger("nano");
@@ -65,9 +65,26 @@ Output rules:
 export async function nano(info: AgentInfo, toolHistory: ToolResult<any, any>[]): Promise<ResponderResponse> {
   const { message } = info;
   const { pastChats } = info;
-  //const { summary } = info; // "String"
-  const downloads: Record<string, string> = JSON.parse(await fs.readFile(`./db/${message.guildId}/downloads.json`, "utf-8"));
-  const plugins: string = await fs.readFile(`./db/${message.guildId}/plugins.json`, "utf-8");
+  
+  // Downloads
+  const downloads = (await prisma.download.findMany({
+    where: {
+      guildId: info.guildId
+    }
+  })).map(download => {
+    const { id, guildId, ...rest} = download;
+    return rest;
+  })
+
+  // Plugins
+  const plugins = (await prisma.plugin.findMany({
+    where: {
+      guildId: info.guildId
+    }
+  })).map(download => {
+    const { id, guildId, ...rest} = download;
+    return rest;
+  });
   
   log.debug("Nano responder started for message", message.id);
 
@@ -127,7 +144,7 @@ export async function nano(info: AgentInfo, toolHistory: ToolResult<any, any>[])
             description: "Optional. An array of any files that need to be sent to the user.",
             items: { 
               type: "string",
-              enum: Object.keys(downloads),
+              enum: downloads.map(obj => obj.file),
               description: "The name of the file you wish to send."
             },
           },

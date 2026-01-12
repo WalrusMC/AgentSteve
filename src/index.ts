@@ -1,11 +1,8 @@
 import "dotenv/config";
 import { Client, GatewayIntentBits, PermissionsBitField, MessageFlags, Message } from "discord.js";
 import { router } from "./router.js";
-//import { summarizer } from "./agents/summarizer.js";
 import path from "path";
 import { createLogger } from "./utils/logger.js";
-import { isUserAllowed, allowUser, allowRole, disallowUser, disallowRole } from "./utils/whitelist.js"; // Move from role and user-based permissions to server administrator-based perms
-import { ensureDBs } from "./utils/ensureDBs.js";
 import { moderate } from "./agents/moderate.js";
 import { getPastChats } from "./utils/getPastChats.js";
 import { gdoc } from "./tools/google.js";
@@ -17,6 +14,15 @@ import type { AgentInfo, ResponderResponse, ToolResult, ReadDocFail, ReadDocSucc
 // Logger scoped to the Discord bot entrypoint
 const log = createLogger("index");
 const getErrorMessage = (err: unknown) => (err instanceof Error ? err.message : String(err));
+
+// Ensure the the downloads folder path exists for the corresponding guild
+const ensureDownloadPath = async function(guildId: string) {
+  try {
+    await fs.access(`./src/tools/downloads/${guildId}/`);
+  } catch {
+    await fs.mkdir(`./src/tools/downloads/${guildId}/`);
+  }
+}
 
 // Create Discord client with the intents Steve requires to read messages and reply
 const client = new Client({
@@ -31,36 +37,18 @@ const client = new Client({
   ]
 });
 
-// Define slash commands with subcommands for user/role management
-const commands = [
-  {
-    name: "allow",
-    description: "Whitelist a user or role to use Steve",
-    options: [
-      { type: 1, name: "user", description: "Allow a user", options: [ { type: 6, name: "target", description: "User to allow", required: true } ] },
-      { type: 1, name: "role", description: "Allow a role", options: [ { type: 8, name: "target", description: "Role to allow", required: true } ] },
-    ],
-  },
-  {
-    name: "disallow",
-    description: "Remove a user or role from the whitelist",
-    options: [
-      { type: 1, name: "user", description: "Disallow a user", options: [ { type: 6, name: "target", description: "User to disallow", required: true } ] },
-      { type: 1, name: "role", description: "Disallow a role", options: [ { type: 8, name: "target", description: "Role to disallow", required: true } ] },
-    ],
-  },
-];
+// TO DO: create commands
 
 /**
  * On Bot Startup
- * Register Commands
+ * Register Commands TO DO: create commands
  * Ensure Databases Are Created
  */
 client.once("clientReady", async (readyClient) => {
   log.info(`Ready! Logged in as ${readyClient.user.tag}`);
-  // Ensure commands exist in all guilds the bot is currently in
   try {
     for (const g of readyClient.guilds.cache.values()) {
+      await ensureDownloadPath(g.id);
       await prisma.guild.upsert({
         where: {
           id: g.id,
@@ -71,7 +59,6 @@ client.once("clientReady", async (readyClient) => {
           name: g.name,
         },
       });
-      await g.commands.set(commands);
     }
   } catch (e: unknown) {
     log.error("Failed to register commands or create databases on ready:", getErrorMessage(e));
@@ -80,12 +67,11 @@ client.once("clientReady", async (readyClient) => {
 
 /**
  * On Guild Join
- * Register commands
+ * Register commands TO DO: create commands
  * Create databases
  */
 client.on("guildCreate", async guild => {
-  await guild.commands.set(commands);
-
+  await ensureDownloadPath(guild.id);
   await prisma.guild.upsert({
     where: {
       id: guild.id,
@@ -210,17 +196,7 @@ client.on("messageCreate", async (message) => {
     if (!readDocResult.success && readDocResult?.error?.code !== 204 && readDocResult?.error?.code !== 404) toolHistory.push({ ...readDocResult, name: "readDoc" });
     if (readDocResult.success) toolHistory.push({ ...readDocResult, name: "readDoc" });
 
-
-    /*
-    // Summaries - TO DO: Completely redesign summaries
-    let summaries = {};
-    try {
-      summaries = JSON.parse(await fs.readFile(`./db/${message.guildId}/summaries.json`, "utf8"));
-    } catch (err) {
-      log.warn("Failed to read summaries file:", err?.message || err);
-    }
-    info.summary = summaries?.[message.channel.id] ? summaries[message.channel.id] : "NO PAST SUMMARIZATION FOUND!";
-    */
+    // Memory - TO DO: Create memory summaries and just memory
 
     // Forward to router, or skip the router if the last message was a clarification message.
     let responderResponse: ResponderResponse;
@@ -262,55 +238,5 @@ client.on("messageCreate", async (message) => {
     log.debug("Cleared typing interval");
     if (typingInterval) clearInterval(typingInterval);
     currentlyRunning[`${message.guildId}`] = false;
-  }
-});
-
-// Slash command handler for allow/disallow
-client.on("interactionCreate", async (interaction) => {
-  try {
-    if (!interaction.isChatInputCommand()) return;
-    if (!interaction.guildId) {
-      return interaction.reply({ content: "This command can only be used in a server.", flags: MessageFlags.Ephemeral });
-    }
-    const cmd = interaction.commandName;
-    const sub = interaction.options.getSubcommand(false);
-
-    // Only users with Manage Server or Admin can edit whitelist
-    const hasPerm = interaction.memberPermissions?.has(PermissionsBitField.Flags.ManageGuild) ||
-                    interaction.memberPermissions?.has(PermissionsBitField.Flags.Administrator);
-    if ((cmd === "allow" || cmd === "disallow") && !hasPerm) {
-      return interaction.reply({ content: "You need Manage Server permission to use this.", flags: MessageFlags.Ephemeral });
-    }
-
-    if (cmd === "allow") {
-      if (sub === "user") {
-        const target = interaction.options.getUser("target", true);
-        await allowUser(target.id, interaction.guildId);
-        return interaction.reply({ content: `Allowed user <@${target.id}> to use Steve.`, flags: MessageFlags.Ephemeral });
-      }
-      if (sub === "role") {
-        const target = interaction.options.getRole("target", true);
-        await allowRole(target.id, interaction.guildId);
-        return interaction.reply({ content: `Allowed role <@&${target.id}> to use Steve.`, flags: MessageFlags.Ephemeral });
-      }
-    }
-
-    if (cmd === "disallow") {
-      if (sub === "user") {
-        const target = interaction.options.getUser("target", true);
-        await disallowUser(target.id, interaction.guildId);
-        return interaction.reply({ content: `Disallowed user <@${target.id}> from using Steve.`, flags: MessageFlags.Ephemeral });
-      }
-      if (sub === "role") {
-        const target = interaction.options.getRole("target", true);
-        await disallowRole(target.id, interaction.guildId);
-        return interaction.reply({ content: `Disallowed role <@&${target.id}> from using Steve.`, flags: MessageFlags.Ephemeral });
-      }
-    }
-  } catch (e) {
-    log.error("Slash command error:", getErrorMessage(e));
-    if (interaction.isRepliable()) {
-      try { await interaction.reply({ content: "Error processing command.", flags: MessageFlags.Ephemeral }); } catch {}
-    }
   }
 });

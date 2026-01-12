@@ -1,7 +1,10 @@
 import { google } from "googleapis";
 import fs from "fs/promises";
+import { prisma } from "../../lib/prisma.js";
 import type { Message } from "discord.js";
 import type { ToolResult, ReadDocFail, ReadDocSuccess, DocTabs } from "../types.js";
+import type { Credentials } from "google-auth-library";
+
 
 // Types & Interfaces
 interface Gdoc {
@@ -79,16 +82,20 @@ gdoc.read = async function(content, message, ids) {
   };
 
   // Get latest authorization token
-  const userRecord = JSON.parse(await fs.readFile(`./db/${message.guildId}/users.json`, "utf8"))?.[message.author.id];
-  let tokens = userRecord?.tokens || userRecord?.token;
-  if (typeof tokens === "string") {
+  const user = await prisma.user.findFirst({
+    where: {
+      id: Number(message.author.id)
+    }
+  })
+  let tokensJson = user?.token
+  let tokens: Credentials | false = false;
+  if (typeof tokensJson === "string") {
     try {
-      tokens = JSON.parse(tokens);
+      tokens = JSON.parse(tokensJson);
     } catch {
       // Leave as string; google auth will throw a clearer error we can handle below.
     }
   }
-
 
   // Create a fresh OAuth client per call to avoid cross-request credential races
   const oauth2Client = createOAuthClient();

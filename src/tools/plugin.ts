@@ -27,7 +27,7 @@ interface Plugin {
     addDependencies: string[],
     removeDependencies: Array<string | number>,
     guildId?: string,
-  ): Promise<ToolResult<PluginDB, { information: string, code: PluginCodes }>>;
+  ): Promise<ToolResult<PluginDB, { information: string, code: PluginCodes } | string>>;
   retrieveCode(
     pluginName: string, 
     files: string[], 
@@ -431,25 +431,19 @@ plugin.createNew = async function(
   await github.writeFile(pluginName, `pom.xml`, pomXML, "Initial commit", guildId);
   await github.writeFile(pluginName, "dependencies.json", JSON.stringify(dependencyBlocks, null, 2), "Dependencies", guildId);
 
-  // Write file name to db
-  const pluginsDbPath = path.join("db", guildId, "plugins.json");
-  let pluginsDb = [];
-  try {
-    pluginsDb = JSON.parse(await fs.readFile(pluginsDbPath, "utf8"));
-  } catch {
-    pluginsDb = [];
-  }
-
   // Build JAR
   const result = await buildJAR(pluginName, "1.0.0", pluginJava, pluginYML, configYML, pomXML, guildId, dependencyBlocks);
   if (result.success) {
     log.debug("Success! Writing plugin information to database");
-    pluginsDb.push({
-      name: pluginName,
-      version: "1.0.0",
-      description: pluginDescription,
-      file: result.result
-    });
+    prisma.plugin.create({
+      data: {
+        name: pluginName,
+        version: "1.0.0",
+        description: pluginDescription,
+        file: result.result,
+        guildId
+      }
+    })
     prisma.download.create({
       data: {
         file: result.result,
@@ -457,8 +451,6 @@ plugin.createNew = async function(
         guildId
       }
     })
-
-    await fs.writeFile(pluginsDbPath, JSON.stringify(pluginsDb, null, 2));
 
     return {
       name: "createNewPlugin",
@@ -494,20 +486,17 @@ plugin.edit = async function(
   const dependenciesToRemove = Array.isArray(removeDependencies) ? [...removeDependencies] : [];
   const pluginsDbPath = path.join("db", guildId, "plugins.json");
 
-  const pluginInfo = JSON.parse(await fs.readFile(`./db/${guildId}/plugins.json`, "utf8")).find((obj: any) => obj.name === pluginName);
+ const pluginInfo = await prisma.plugin.findFirst({
+    where: {
+      guildId,
+      name: pluginName
+    }
+  })
+  if (!pluginInfo) return { success: false, name: "editPlugin", error: "An unknown error has occurred. Do not call this tool again."}
   if (!pluginDescription?.length) pluginDescription = pluginInfo.description;
 
-  let pluginsDb = [];
-  try {
-    pluginsDb = JSON.parse(await fs.readFile(pluginsDbPath, "utf8"));
-  } catch {
-    pluginsDb = [];
-  }
-
   // Each edit bumps the stored semver patch so generated jars stay unique.
-  const matchesPlugin = (obj: any = {}) => obj.name === pluginName || obj.pluginName === pluginName;
-  const existingPlugin = pluginsDb.find(matchesPlugin);
-  const currentVersion = existingPlugin?.version || "1.0.0";
+  const currentVersion = pluginInfo.version || "1.0.0";
   const pluginVersion = bumpPatchVersion(currentVersion);
 
   let pluginJava = await github.getFile(pluginName, `src/main/java/com/walrusmc/${pluginName}.java`, guildId);
@@ -633,31 +622,25 @@ plugin.edit = async function(
   await github.writeFile(pluginName, "pom.xml", pomXML, `Update pom.xml to ${pluginVersion}`, guildId);
   await github.writeFile(pluginName, "dependencies.json", JSON.stringify(dependencies, null, 2), "Update dependencies list", guildId);
 
+  const result = await buildJAR(pluginName, pluginVersion, pluginJava, pluginYML, configYML, pomXML, guildId, dependencies);
+
   const pluginRecord: PluginDB = {
     name: pluginName,
     version: pluginVersion,
     description: pluginDescription,
     file: `${pluginName}-${pluginVersion}.jar`
-  };
-  const pluginIndex = pluginsDb.findIndex(matchesPlugin);
-  if (pluginIndex === -1) {
-    pluginsDb.push(pluginRecord);
-  } else {
-    pluginsDb[pluginIndex] = pluginRecord;
   }
-
-  const result = await buildJAR(pluginName, pluginVersion, pluginJava, pluginYML, configYML, pomXML, guildId, dependencies);
 
   if (result.success) {
     log.debug("Success! Writing plugin information to database");
-    const pluginIndex = pluginsDb.findIndex(matchesPlugin);
-    if (pluginIndex === -1) {
-      pluginsDb.push(pluginRecord);
-    } else {
-      pluginsDb[pluginIndex] = pluginRecord;
-    }
-
-    await fs.writeFile(pluginsDbPath, JSON.stringify(pluginsDb, null, 2));
+    prisma.plugin.update({
+      where: {
+        id: pluginInfo.id,
+        name: pluginName,
+        guildId: guildId
+      },
+      data: pluginRecord
+    });
 
     return {
       name: "createNewPlugin",
@@ -677,8 +660,13 @@ plugin.retrieveCode = async function(pluginName, files, guildId) {
 
   const oldCode: CodeStrings = {};
 
-  const pluginInfo = JSON.parse(await fs.readFile(`./db/${guildId}/plugins.json`, "utf8")).find((obj: any) => obj.name === pluginName);
-  const pluginDescription = pluginInfo?.description ?? "";
+  const pluginInfo = await prisma.plugin.findFirst({
+    where: {
+      guildId,
+      name: pluginName
+    }
+  })
+  if (!pluginInfo) return { success: false, name: "editPlugin", error: "An unknown error has occurred. Do not call this tool again."}
   oldCode.pluginJava = files.includes("pluginJava") ? await github.getFile(pluginName, `src/main/java/com/walrusmc/${pluginName}.java`, guildId) : undefined;
   oldCode.pluginYML = files.includes("pluginYML") ? await github.getFile(pluginName, `src/main/resources/plugin.yml`, guildId) : undefined;
   oldCode.configYML = files.includes("configYML") ? await github.getFile(pluginName, "src/main/resources/config.yml", guildId) : undefined;
@@ -690,7 +678,7 @@ plugin.retrieveCode = async function(pluginName, files, guildId) {
     success: true,
     result: {
       name: pluginName,
-      description: pluginDescription,
+      description: pluginInfo.description,
       code: newCode
     },
   }
