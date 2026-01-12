@@ -16,8 +16,8 @@ const oauth2Client = new google.auth.OAuth2(
 export async function googleOAuth(req: any, res: any) {
   try {
     const token = req.body?.token;
-    const guild = req.body?.guild;
-    const user = req.body?.user;
+    const guild: string = req.body?.guild;
+    const user: string = req.body?.user;
 
     // Require OAuth token and state data
     if (!token || !user || !guild) {
@@ -35,16 +35,16 @@ export async function googleOAuth(req: any, res: any) {
     const userId = String(user);
     await prisma.user.upsert({
       where: {
-        guildId: guild.id,
+        guildId: guild,
         id: user
       },
       create: {
-        guildId: guild.id,
+        guildId: guild,
         id: user,
         token: token
       },
       update: {
-        token: token
+        token: JSON.stringify(token)
       }
     });
 

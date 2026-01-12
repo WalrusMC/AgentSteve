@@ -53,7 +53,7 @@ BEHAVIOR RULES
 =======================
 - When all tool work is finished, immediately call respond().
 - When uncertain of user intent, request clarification with clarify().
-- You may use Discord formatting (bold, italics, inline code, code blocks, emoji)
+- Use Discord formatting (bold, italics, inline code, code blocks, emojis)
   inside respond() to improve readability.
 `;
 
@@ -353,7 +353,7 @@ export async function moderate(info: AgentInfo, toolHistory: ToolResult<any, any
       case "readDoc":
         // TO DO: Add summarizer for really big documents.
         // TO DO: Fix tool results for document reading capabilities!!!!
-        toolResult = await gdoc.read(false, message, args.ids);
+        toolResult = await gdoc.read(info.guildId, false, message, args.ids);
         if (toolResult.success) {
           // TO DO: Improve the toolResult system (toolResult.result)
           if (toolResult.result.size > 20000) {

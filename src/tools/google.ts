@@ -9,6 +9,7 @@ import type { Credentials } from "google-auth-library";
 // Types & Interfaces
 interface Gdoc {
   read(
+      guildId: string,
       content: string | false,
       message: Message, 
       ids?: string[]
@@ -63,7 +64,7 @@ const getTabs = function(tabs: any[]) {
 
 // TO DO: Fix tool results for document reading capabilities!!!!
 // Entry point for extracting documents from a message
-gdoc.read = async function(content, message, ids) {
+gdoc.read = async function(guildId, content, message, ids) {
 
   // Extract IDs or use given IDs
   const docIds = content ? gdoc.extractIds(content) : ids;
@@ -84,7 +85,8 @@ gdoc.read = async function(content, message, ids) {
   // Get latest authorization token
   const user = await prisma.user.findFirst({
     where: {
-      id: Number(message.author.id)
+      id: message.author.id,
+      guildId
     }
   })
   let tokensJson = user?.token

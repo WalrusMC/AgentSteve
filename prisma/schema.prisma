@@ -47,7 +47,7 @@ model Server {
 }
 
 model User {
-  id Int @id
+  id String @id
   token Json
 
   guild Guild @relation(fields: [guildId], references: [id])
