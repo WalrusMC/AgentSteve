@@ -6,5 +6,6 @@ google-key-file.json
 devVariables.js
 dist/
 dev-logs/
-/generated/prisma
+generated/prisma
 dev.db
+prisma/migrations
