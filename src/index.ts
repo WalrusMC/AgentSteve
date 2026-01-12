@@ -1,5 +1,5 @@
 import "dotenv/config";
-import { Client, GatewayIntentBits, PermissionsBitField, MessageFlags, Message } from "discord.js";
+import { Client, GatewayIntentBits, PermissionsBitField } from "discord.js";
 import { router } from "./router.js";
 import path from "path";
 import { createLogger } from "./utils/logger.js";

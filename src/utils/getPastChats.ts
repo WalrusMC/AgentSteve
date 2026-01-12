@@ -1,4 +1,4 @@
-import { isUserAllowed } from "./whitelist.js";
+import { PermissionsBitField } from "discord.js";
 import type { CustomMessage, PastChats } from "../types.js";
 import type { GuildMember, Message, Snowflake } from "discord.js";
 
@@ -39,8 +39,7 @@ export async function getPastChats(message: Message, limit: number): Promise<Pas
         person.member = await message.guild?.members.fetch(chat.author.id) ?? null;
         person.username = chat.author.username;
         person.id = chat.author.id;
-        // Treat whitelisted users as ADMINISTRATOR for context labelling
-        person.role = (await isUserAllowed(person.member, guildId)) ? true : false;
+        person.role = chat.member?.permissions?.has(PermissionsBitField.Flags.Administrator) ? true : false
       } catch {
         // Fall back if the member is not resolvable (e.g., left server)
         person.member = null;
