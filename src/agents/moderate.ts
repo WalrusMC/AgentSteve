@@ -308,7 +308,7 @@ export async function moderate(info: AgentInfo, toolHistory: ToolResult<any, any
   ];
 
   // Send request to OpenAI API
-  log.response("OPENAI INPUT (MODERATE)", `|SYSTEM|\n${systemPrompt}\n|DEVELOPER|\n${devInput}\n|USER|\n${userInput}\n|ASSISTANT|\n${assistantInput}`);
+  log.response("OPENAI INPUT (MODERATE)", `|TOOLS|\n${JSON.stringify(tools, null, 2)}\n|SYSTEM|\n${systemPrompt}\n|DEVELOPER|\n${devInput}\n|USER|\n${userInput}\n|ASSISTANT|\n${assistantInput}`);
   const response = await client.responses.create({
     model: models.general.medium.slow,
     input: [

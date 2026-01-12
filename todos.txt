@@ -1,0 +1,3 @@
+Just some small "to dos" that anyone thinks of.
+
+TODO: Potentially change from Java to Kotlin for plugin builder (src/tools/plugin.ts)

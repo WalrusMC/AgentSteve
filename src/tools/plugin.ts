@@ -27,7 +27,7 @@ interface Plugin {
     addDependencies: string[],
     removeDependencies: Array<string | number>,
     guildId?: string,
-  ): Promise<ToolResult<PluginDB, { information: string, code: PluginCodes } | string>>;
+  ): Promise<ToolResult<PluginDB, { information: string, code: PluginCodes }>>;
   retrieveCode(
     pluginName: string, 
     files: string[], 
@@ -435,7 +435,7 @@ plugin.createNew = async function(
   const result = await buildJAR(pluginName, "1.0.0", pluginJava, pluginYML, configYML, pomXML, guildId, dependencyBlocks);
   if (result.success) {
     log.debug("Success! Writing plugin information to database");
-    prisma.plugin.create({
+    await prisma.plugin.create({
       data: {
         name: pluginName,
         version: "1.0.0",
@@ -444,7 +444,7 @@ plugin.createNew = async function(
         guildId
       }
     })
-    prisma.download.create({
+    await prisma.download.create({
       data: {
         file: result.result,
         description: "A Minecraft plugin JAR created by you, Steve.",
@@ -492,7 +492,7 @@ plugin.edit = async function(
       name: pluginName
     }
   })
-  if (!pluginInfo) return { success: false, name: "editPlugin", error: "An unknown error has occurred. Do not call this tool again."}
+  if (!pluginInfo) return { success: false, name: "editPlugin", error: { information: "An unknown error has occurred. Do not call this tool again.", code: "UNKOWN" }}
   if (!pluginDescription?.length) pluginDescription = pluginInfo.description;
 
   // Each edit bumps the stored semver patch so generated jars stay unique.
@@ -633,7 +633,7 @@ plugin.edit = async function(
 
   if (result.success) {
     log.debug("Success! Writing plugin information to database");
-    prisma.plugin.update({
+    await prisma.plugin.update({
       where: {
         id: pluginInfo.id,
         name: pluginName,
