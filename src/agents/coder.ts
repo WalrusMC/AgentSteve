@@ -4,8 +4,8 @@ import { plugin } from "../tools/plugin.js";
 import { models } from "../models.js";
 import type { AgentInfo, ToolResult } from "../types.js";
 import type { PluginDB } from "../tools/plugin.js";
+import { gptResponse } from "../utils/gptResponse.js";
 
-const client = new OpenAI;
 const log = createLogger("coder");
 
 const systemPrompt = `You are Steve, an AI assistant who lives on Discord and assists Minecraft server owners. 
@@ -31,7 +31,7 @@ type CoderJob = "createNewPlugin" | "editPlugin" | "fixCrash";
 export async function coder(
   job: CoderJob,
   pluginName: string,
-  assistantMessage: string,
+  assistantInput: string,
   model: string,
   info: AgentInfo,
   data?: string,
@@ -40,7 +40,7 @@ export async function coder(
   const { pastChats } = info;
   const guildId = message.guildId;
   if (!guildId) throw new Error("Missing guildId on coder message");
-  const toolsArray = [
+  const toolsArray: OpenAI.Responses.Tool[] = [
     { 
       type: "function",
       name: "createNewPlugin",
@@ -85,6 +85,7 @@ export async function coder(
         },
         required: ["pluginJava", "pluginYML", "pluginDescription"],
       },
+      strict: true
     },
     {
         type: "function",
@@ -144,21 +145,17 @@ export async function coder(
             },
           },
         },
+        strict: true
       },
   ];
 
-  let developerPrompt: string;
-  let tool: {
-    type: string,
-    name: string,
-    description: string,
-    parameters: object
-  };
+  let devInput: string;
+  let tool: OpenAI.Responses.Tool;
 
   let dataResult;
   switch (job) {
     case "createNewPlugin":
-      developerPrompt = `Your job is to create a new Paper 1.20.1 Minecraft plugin called ${pluginName} from the user prompt by calling 
+      devInput = `Your job is to create a new Paper 1.20.1 Minecraft plugin called ${pluginName} from the user prompt by calling 
       the **createNewPlugin** tool. You may use your assisant message to understand the user intent and your past chats to 
       understand the context of the current user message.`;
       tool = toolsArray[0];
@@ -168,7 +165,7 @@ export async function coder(
       if (dataResult.success) {
         data = JSON.stringify(dataResult.result);
       }
-      developerPrompt = `Your job is to edit a Paper 1.20.1 Minecraft plugin called ${pluginName} to fufill the user request by calling 
+      devInput = `Your job is to edit a Paper 1.20.1 Minecraft plugin called ${pluginName} to fufill the user request by calling 
       using the **editPlugin** tool. You may use your assistant message to understand the user intent and your past chats to 
       understand the context of the current user message.
       Rules:
@@ -185,7 +182,7 @@ export async function coder(
       tool = toolsArray[1];
       break;
     case "fixCrash":
-      developerPrompt = `Your job is to fix a Paper 1.20.1 Minecraft plugin called ${pluginName}.
+      devInput = `Your job is to fix a Paper 1.20.1 Minecraft plugin called ${pluginName}.
       You may use the user prompt and assistant message to understand the context of the plugin.
       Maven crashed while trying to build this plugin into a JAR. 
       Call the **editPlugin** tool to fix the plugin.
@@ -196,12 +193,12 @@ export async function coder(
       break;
   }
 
-  if (!developerPrompt || !tool) {
+  if (!devInput || !tool) {
     throw new Error(`Invalid coder job: ${job}`);
   }
 
   // Tools
-  const tools = [
+  const tools: OpenAI.Responses.Tool[] = [
     { type: "web_search" },
     tool,
   ]
@@ -225,75 +222,58 @@ export async function coder(
     currentUserMessage: currentUserMessage
   }, null, 2);
 
-  // Send request to OpenAI API
-  log.response("OPENAI INPUT (CODER)", `|SYSTEM|\n${systemPrompt}\n|DEVELOPER|\n${developerPrompt}\n|USER|\n${userInput}\n|ASSISTANT|\n${JSON.stringify(assistantMessage, null, 2)}`);
-  const response = await client.responses.create({
-    model: model,
-    input: [
-      { role: "system", content: systemPrompt },
-      { role: "developer", content: developerPrompt },
-      { role: "user", content: userInput },
-      { role: "assistant", content: JSON.stringify(assistantMessage, null, 2) },
-    ],
-    tools: tools
-  } as any);
-  log.response("CODER RESPONSE", response);
+  // Send request to OpenAI
+  const response = await gptResponse("moderate", message, models.general.medium.slow, tools, systemPrompt, devInput, userInput, assistantInput);
+  if (!response.success) return {
+    name: job,
+    success: false,
+    error: "A critical error has occurred. Do not call this tool again."
+  };
+  const toolCall = response.toolCall;
 
-  // Call tools
-  const toolCall = (response as any).output.find?.((c: any) => c.type === "function_call" || c.type === "tool_call");
-  if (toolCall) {
-    const args = JSON.parse(toolCall.arguments);
-    let toolResult;
-    switch (toolCall.name) {
-      case "createNewPlugin":
-        toolResult = await plugin.createNew(pluginName, args.pluginDescription, args.pluginJava, args.pluginYML, args?.configYML, args?.dependencies, guildId);
-        if (toolResult.success) {
-          return toolResult; // Success
-        } else if(toolResult.error.code === "ALREADY_EXISTS") {
-          return {
-            name: "createNewPlugin",
-            success: false,
-            error: "The new plugin you tried to create already exists. If you wish to edit a pre-existing plugin, you must call the editPlugin tool, not the createNewPlugin tool."
-          }
-        } else if(toolResult.error.code === "CRASH") {
-          // TO DO: Improve the toolResult system (toolResult.result)
-          return coder("fixCrash", pluginName, assistantMessage, models.coder.high.slow, info, toolResult.error.information);
-        } else {
-          return {
-            name: "createNewPlugin",
-            success: false,
-            error: "A critical error has occurred."
-          }
-        }
-      case "editPlugin":
-        toolResult = await plugin.edit(pluginName, args?.pluginDescription, args?.deletions, args?.insertions, args?.addDependencies, args?.removeDependencies, guildId);
-        if (toolResult.success) {
-          return toolResult;
-        } else if(toolResult.error.code === "CRASH") {
-          // TO DO: Improve the toolResult system (toolResult.result)
-          return coder("fixCrash", pluginName, assistantMessage, models.coder.high.slow, info, toolResult.error.information);
-        } else {
-          return {
-            name: "editPlugin",
-            success: false,
-            error: "A critical error has occurred."
-          }
-        }
-      default:
-        log.error("GPT did not call a valid tool.");
+
+  // Execute tool call
+  const args = JSON.parse(toolCall.arguments);
+  let toolResult;
+  switch (toolCall.name) {
+    case "createNewPlugin":
+      toolResult = await plugin.createNew(pluginName, args.pluginDescription, args.pluginJava, args.pluginYML, args?.configYML, args?.dependencies, guildId);
+      if (toolResult.success) {
+        return toolResult; // Success
+      } else if(toolResult.error.code === "ALREADY_EXISTS") {
         return {
-          name: job,
+          name: "createNewPlugin",
           success: false,
-          error: "An internal error has occurred."
-        };
-    }
-  } else {
-    log.error("GPT did not call a tool.");
-    return {
-      name: job,
-      success: false,
-      error: "An internal error has occurred."
-    };
+          error: "The new plugin you tried to create already exists. If you wish to edit a pre-existing plugin, you must call the editPlugin tool, not the createNewPlugin tool."
+        }
+      } else if(toolResult.error.code === "CRASH") {
+        return coder("fixCrash", pluginName, assistantInput, models.coder.high.slow, info, toolResult.error.information);
+      } else {
+        return {
+          name: "createNewPlugin",
+          success: false,
+          error: "A critical error has occurred. Do not call this tool again."
+        }
+      }
+    case "editPlugin":
+      toolResult = await plugin.edit(pluginName, args?.pluginDescription, args?.deletions, args?.insertions, args?.addDependencies, args?.removeDependencies, guildId);
+      if (toolResult.success) {
+        return toolResult;
+      } else if(toolResult.error.code === "CRASH") {
+        return coder("fixCrash", pluginName, assistantInput, models.coder.high.slow, info, toolResult.error.information);
+      } else {
+        return {
+          name: "editPlugin",
+          success: false,
+          error: "A critical error has occurred. Do not call this tool again."
+        }
+      }
+    default:
+      log.error("GPT did not call a valid tool.");
+      return {
+        name: job,
+        success: false,
+        error: "A critical error has occurred. Do not call this tool again."
+      };
   }
-
 }

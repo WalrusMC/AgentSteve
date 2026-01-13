@@ -7,7 +7,7 @@ import { models } from "../models.js";
 import { server } from "../tools/server.js";
 import type { AgentInfo, ResponderResponse, ToolResult } from "../types.js";
 import { prisma } from "../../lib/prisma.js";
-const client = new OpenAI;
+import { gptResponse } from "../utils/gptResponse.js";
 const log = createLogger("moderate");
 
 const systemPrompt = `You are Steve, an advanced multi-model AI assistant for Minecraft server owners.
@@ -90,7 +90,6 @@ export async function moderate(info: AgentInfo, toolHistory: ToolResult<any, any
   
   log.debug("Moderate started for message", message.id);
 
-
   // Current User Message
   const attachmentNames = message?.attachments?.size 
   ? message.attachments.map(att => att.name ?? "UNKNOWN_ATTACHMENT")
@@ -108,7 +107,7 @@ export async function moderate(info: AgentInfo, toolHistory: ToolResult<any, any
 
   // User Input
   const userInput = JSON.stringify({
-    pastChats: pastChats,
+    pastChats,
     currentUserMessage: currentUserMessage
   }, null, 2);
 
@@ -142,7 +141,7 @@ export async function moderate(info: AgentInfo, toolHistory: ToolResult<any, any
   }, null, 2);
 
   // Tools
-  const tools = [
+  const tools: OpenAI.Responses.Tool[] = [
     { type: "web_search" },
     {
       type: "function",
@@ -166,6 +165,7 @@ export async function moderate(info: AgentInfo, toolHistory: ToolResult<any, any
         },
         required: ["responseText"],
       },
+      strict: true
     },
     {
       type: "function",
@@ -215,8 +215,9 @@ export async function moderate(info: AgentInfo, toolHistory: ToolResult<any, any
             `,
           },
         },
+        required: ["pluginName", "assistantMessage", "complex"],
       },
-      required: ["pluginName", "assistantMessage", "complex"],
+      strict: true,
     },
     {
       type: "function",
@@ -267,8 +268,9 @@ export async function moderate(info: AgentInfo, toolHistory: ToolResult<any, any
             `,
           },
         },
+        required: ["pluginName", "assistantMessage", "complex"],
       },
-      required: ["pluginName", "assistantMessage", "complex"],
+      strict: true,
     },
     {
       type: "function",
@@ -282,8 +284,9 @@ export async function moderate(info: AgentInfo, toolHistory: ToolResult<any, any
             description: "The text question to be sent to the user.",
           }
         },
+        required: ["question"],
       },
-      required: ["question"],
+      strict: true
     },
     {
       type: "function",
@@ -303,115 +306,97 @@ export async function moderate(info: AgentInfo, toolHistory: ToolResult<any, any
             }
         },
         required: ["ids"],
-      }
+      },
+      strict: true
     }
   ];
 
-  // Send request to OpenAI API
-  log.response("OPENAI INPUT (MODERATE)", `|TOOLS|\n${JSON.stringify(tools, null, 2)}\n|SYSTEM|\n${systemPrompt}\n|DEVELOPER|\n${devInput}\n|USER|\n${userInput}\n|ASSISTANT|\n${assistantInput}`);
-  const response = await client.responses.create({
-    model: models.general.medium.slow,
-    input: [
-      { role: "system", content: systemPrompt },
-      { role: "developer", content: devInput },
-      { role: "user", content: userInput },
-      { role: "assistant", content: assistantInput }
-    ],
-    tools: tools
-  } as any);
-  log.response("MODERATE RESPONSE", response);
+  // Send request to OpenAI
+  const response = await gptResponse("moderate", message, models.general.medium.slow, tools, systemPrompt, devInput, userInput, assistantInput);
+  if (!response.success) return response.return;
+  const toolCall = response.toolCall;
 
-  // Call tools
-  const toolCall = (response as any).output.find?.((c: any) => c.type === "function_call" || c.type === "tool_call");
-  if (toolCall) {
-    const args = JSON.parse(toolCall.arguments);
-    let toolResult;
-    switch (toolCall.name) {
-      case "respond":
-        return {
-          messages: await sendMsgDiscord(args.responseText, message, args.files),
-          isClarification: false,
-          responder: "moderate"
-        };
-      case "editPlugin":
-      case "createNewPlugin":
-        toolResult = await coder(toolCall.name, args.pluginName, args.assistantMessage, args.complex ? models.coder.high.slow : models.coder.medium.slow, info);
-        if (toolResult.success) {
-          // TO DO: Improve the toolResult system (toolResult.result)
-          toolHistory.push({ ...toolResult, name: toolCall.name});
+  // Execute tool call
+  const args = JSON.parse(toolCall.arguments);
+  let toolResult;
+  switch (toolCall.name) {
+    case "respond":
+      return {
+        messages: await sendMsgDiscord(args.responseText, message, args.files),
+        isClarification: false,
+        responder: "moderate"
+      };
+    case "editPlugin":
+    case "createNewPlugin":
+      toolResult = await coder(toolCall.name, args.pluginName, args.assistantMessage, args.complex ? models.coder.high.slow : models.coder.medium.slow, info);
+      if (toolResult.success) {
+        // TO DO: Improve the toolResult system (toolResult.result)
+        toolHistory.push({ ...toolResult, name: toolCall.name});
+        return await moderate(info, toolHistory, devInput);
+      } else {
+        toolHistory.push({ ...toolResult, name: toolCall.name});
+        return await moderate(info, toolHistory, devInput);
+      }
+    case "clarify":
+      return {
+        messages: await sendMsgDiscord(args.question, message),
+        isClarification: true,
+        responder: "moderate"
+      };
+    case "readDoc":
+      // TO DO: Add summarizer for really big documents.
+      // TO DO: Fix tool results for document reading capabilities!!!!
+      toolResult = await gdoc.read(info.guildId, false, message, args.ids);
+      if (toolResult.success) {
+        // TO DO: Improve the toolResult system (toolResult.result)
+        if (toolResult.result.size > 20000) {
+          toolHistory.push({
+            name: "readDoc",
+            success: false,
+            error: `The requested document/documents (${args.ids}) was/were too big. Documents should be a maximum of ~15,000.`
+          });
           return await moderate(info, toolHistory, devInput);
         } else {
-          toolHistory.push({ ...toolResult, name: toolCall.name});
+          toolHistory.push({ name: toolCall.name, success: true, result: toolResult.result.documents});
           return await moderate(info, toolHistory, devInput);
         }
-      case "clarify":
-        return {
-          messages: await sendMsgDiscord(args.question, message),
-          isClarification: true,
-          responder: "moderate"
-        };
-      case "readDoc":
-        // TO DO: Add summarizer for really big documents.
-        // TO DO: Fix tool results for document reading capabilities!!!!
-        toolResult = await gdoc.read(info.guildId, false, message, args.ids);
-        if (toolResult.success) {
-          // TO DO: Improve the toolResult system (toolResult.result)
-          if (toolResult.result.size > 20000) {
-            toolHistory.push({
-              name: "readDoc",
-              success: false,
-              error: `The requested document/documents (${args.ids}) was/were too big. Documents should be a maximum of ~15,000.`
-            });
-            return await moderate(info, toolHistory, devInput);
-          } else {
-            toolHistory.push({ name: toolCall.name, success: true, result: toolResult.result.documents});
-            return await moderate(info, toolHistory, devInput);
-          }
+      }
+      switch (toolResult.error.reason) {
+        case "NO_AUTH":
+        case "FORBIDDEN":
+          return {
+            messages: false,
+            isClarification: false,
+            responder: "moderate"
+          }; // A message is sent to the user explaining how they can grant Steve access to documents from google.js.
+        case "NOT_FOUND":
+          toolHistory.push({
+            name: "readDoc",
+            success: false,
+            error: `The requested document/documents (${args.ids}) could not be accessed (missing permission, or broken link). Do not try to access that/those document/documents again.`
+          });
+          return await moderate(info, toolHistory, devInput);
+        case "UNKNOWN":
+          toolHistory.push({
+            name: "readDoc",
+            success: false,
+            error: `Failed to read the requested document/documents (${args.ids}) due to a Google API/auth error. Do not try this tool again.`
+          });
+          return await moderate(info, toolHistory, devInput);
+        default:
+          log.error("gdoc.read() returned invalid data.");
+          return {
+            messages: await sendMsgDiscord("Oh no! An error has occured.", message),
+            isClarification: false,
+            responder: "moderate"
+          };
         }
-        switch (toolResult.error.reason) {
-          case "NO_AUTH":
-          case "FORBIDDEN":
-            return {
-              messages: false,
-              isClarification: false,
-              responder: "moderate"
-            }; // A message is sent to the user explaining how they can grant Steve access to documents from google.js.
-          case "NOT_FOUND":
-            toolHistory.push({
-              name: "readDoc",
-              success: false,
-              error: `The requested document/documents (${args.ids}) could not be accessed (missing permission, or broken link). Do not try to access that/those document/documents again.`
-            });
-            return await moderate(info, toolHistory, devInput);
-          case "UNKNOWN":
-            toolHistory.push({
-              name: "readDoc",
-              success: false,
-              error: `Failed to read the requested document/documents (${args.ids}) due to a Google API/auth error. Do not try this tool again.`
-            });
-            return await moderate(info, toolHistory, devInput);
-          default:
-            log.error("gdoc.read() returned invalid data.");
-            return {
-              messages: await sendMsgDiscord("Oh no! An error has occured.", message),
-              isClarification: false,
-              responder: "moderate"
-            };
-          }
-      default:
-        log.error("GPT did not call a valid tool.");
-        return {
-          messages: await sendMsgDiscord("Oh no! An error has occured.", message),
-          isClarification: false,
-          responder: "moderate"
-        };
-    }
-  } else {
-    log.error("GPT did not call a tool.");
-    return {
-      messages: await sendMsgDiscord("Oh no! An error has occured.", message),
-      isClarification: false,
-      responder: "moderate"
-    };
+    default:
+      log.error("GPT did not call a valid tool.");
+      return {
+        messages: await sendMsgDiscord("Oh no! An error has occured.", message),
+        isClarification: false,
+        responder: "moderate"
+      };
   }
 };

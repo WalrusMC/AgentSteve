@@ -5,8 +5,8 @@ import { moderate } from "./moderate.js";
 import { models } from "../models.js";
 import type { AgentInfo, ResponderResponse, ToolResult } from "../types.js";
 import { prisma } from "../../lib/prisma.js";
+import { gptResponse } from "../utils/gptResponse.js";
 
-const client = new OpenAI;
 const log = createLogger("nano");
 
 const systemPrompt = `You are Steve, an AI assistant for Minecraft server owners. You live on Discord and you help users with tasks such as:
@@ -128,7 +128,7 @@ export async function nano(info: AgentInfo, toolHistory: ToolResult<any, any>[])
 
 
   // Tools
-  const tools = [
+  const tools: OpenAI.Responses.Tool[] = [
     {
       type: "function",
       name: "respond",
@@ -151,74 +151,41 @@ export async function nano(info: AgentInfo, toolHistory: ToolResult<any, any>[])
         },
         required: ["responseText"],
       },
+      strict: true
     },
     {
       type: "function",
       name: "moderate",
+      parameters: {},
+      strict: true
     }
   ];
 
 
-  // Send initial route decision request to OpenAI
-  log.debug(`Sending request to ${models.general.low.slow}`);
-  log.response("OPENAI INPUT (NANO)", `|SYSTEM|\n${systemPrompt}\n|DEVELOPER|\n${devInput}\n|USER|\n${userInput}\n|ASSISTANT|\n${assistantInput}`);
-  const response = await client.responses.create({
-    model: models.general.low.slow,
-    input: [
-      { role: "system", content: systemPrompt },
-      { role: "developer", content: devInput },
-      { role: "user", content: userInput },
-      { role: "assistant", content: assistantInput },
-    ],
-    tools: tools
-  } as any);
-  log.response("NANO RESPONSE", response);
+  // Send request to OpenAI
+  const response = await gptResponse("nano", message, models.general.low.slow, tools, systemPrompt, devInput, userInput, assistantInput);
+  if (!response.success) return response.return;
+  const toolCall = response.toolCall;
 
-  // Call tools
-  const toolCall = (response as any)?.output?.find?.((c: any) => c.type === "function_call" || c.type === "tool_call");
-  const responseText = (response as any)?.output?.[1]?.content?.[0]?.text;
-  if (toolCall) {
-    const args = JSON.parse(toolCall.arguments);
-    switch (toolCall.name) {
-      case "respond":
-        log.debug("The nano responder chose to respond itself.");
-        return {
-          messages: await sendMsgDiscord(args.responseText, message, args.files),
-          isClarification: false,
-          responder: "nano"
-        };
-      case "moderate":
-        log.debug("The nano responder decided to forward the message.");
-        return await moderate(info, toolHistory);
-      default:
-        log.error("The nano responder did not call a valid tool.")
-        return {
-          messages: await sendMsgDiscord("Oh no! An error has occured.", message),
-          isClarification: false,
-          responder: "nano"
-        };
-    }
-  } else if (responseText) {
-    switch (responseText) {
-      case "moderate()":
-      case "moderate":
-        log.warn("The nano responder returned output text and decided to forward the message.");
-        return await moderate(info, toolHistory);
-      default:
-        log.error("The nano responder returned output text. Aborting.");
-        return {
-          messages: await sendMsgDiscord("Oh no! An error has occured.", message),
-          isClarification: false,
-          responder: "nano"
-        };
-    }
-  } else {
-    log.error("The nano responder did not call a tool or return output text.");
-    return {
-      messages: await sendMsgDiscord("Oh no! An error has occured.", message),
-      isClarification: false,
-      responder: "nano"
-    };
+  // Execute tool call
+  const args = JSON.parse(toolCall.arguments);
+  switch (toolCall.name) {
+    case "respond":
+      log.debug("The nano responder chose to respond itself.");
+      return {
+        messages: await sendMsgDiscord(args.responseText, message, args.files),
+        isClarification: false,
+        responder: "nano"
+      };
+    case "moderate":
+      log.debug("The nano responder decided to forward the message.");
+      return await moderate(info, toolHistory);
+    default:
+      log.error("The nano responder did not call a valid tool.")
+      return {
+        messages: await sendMsgDiscord("Oh no! An error has occured.", message),
+        isClarification: false,
+        responder: "nano"
+      };
   }
-
 };

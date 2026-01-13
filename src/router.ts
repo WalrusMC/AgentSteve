@@ -18,7 +18,7 @@ export async function router(info: AgentInfo, toolHistory: ToolResult<any, any>[
   "needs_iterative_code_execution_or_debugging",
   "needs_large_workflow"
   */
-  const routingFlags = await classifier(message);
+  const routingFlags = await classifier(info);
 
   console.log(JSON.stringify(routingFlags, null, 2));
 
