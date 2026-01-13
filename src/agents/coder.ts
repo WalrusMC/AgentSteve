@@ -31,7 +31,7 @@ type CoderJob = "createNewPlugin" | "editPlugin" | "fixCrash";
 export async function coder(
   job: CoderJob,
   pluginName: string,
-  assistantMessage: string,
+  assistantInput: string,
   model: string,
   info: AgentInfo,
   data?: string,
@@ -40,13 +40,14 @@ export async function coder(
   const { pastChats } = info;
   const guildId = message.guildId;
   if (!guildId) throw new Error("Missing guildId on coder message");
-  const toolsArray = [
+  const toolsArray: OpenAI.Responses.Tool[] = [
     { 
       type: "function",
       name: "createNewPlugin",
       description: `Creates a new Paper 1.20.1 Minecraft plugin called ${pluginName}.`,
       parameters: {
         type: "object",
+        additionalProperties: false,
         properties: {
           pluginDescription: {
             type: "string",
@@ -67,12 +68,12 @@ export async function coder(
             description: `The code for plugin.yml. Must include main: com.walrusmc.${pluginName.toLowerCase()}.${pluginName}`,
           },
           configYML: {
-            type: "string",
-            description: "Optional. The code for config.yml",
+            type: ["string"],
+            description: "Optional (empty string if none). The code for config.yml.",
           },
           dependencies: { 
-            type: "array", 
-            description: `Optional. Additional Maven dependency XML blocks to insert inside pom.xml <dependencies> 
+            type: ["array"], 
+            description: `Optional (empty array if none). Additional Maven dependency XML blocks to insert inside pom.xml <dependencies>
             (as raw XML). DO NOT include paper-api (1.20.1) or adventure-api (these are already included), but include any other dependencies your code requires. Example format:
             <dependency>
               <groupId>com.github.placeholderapi</groupId>
@@ -83,8 +84,9 @@ export async function coder(
             items: { type: "string", description: "A single Maven <dependency>...</dependency> XML block as raw text."},
           },
         },
-        required: ["pluginJava", "pluginYML", "pluginDescription"],
+        required: ["pluginJava", "pluginYML", "pluginDescription", "configYML", "dependencies"],
       },
+      strict: true
     },
     {
         type: "function",
@@ -92,42 +94,45 @@ export async function coder(
         description: "Makes changes to a plugin via deletions and insertions. The correct package is com.walrusmc.",
         parameters: {
           type: "object",
+          additionalProperties: false,
           properties: {
             pluginDescription: {
-              type: "string",
-              description: "Optional. An updated 1-5 sentence description of the entire plugin. If this is ommitted, the original description will be used.",
+              type: ["string"],
+              description: "Optional (empty string if none). An updated 1-5 sentence description of the entire plugin. If this is ommitted, the original description will be used.",
             },
             deletions: {
-              type: "array",
-              description: "An array of sections of the code to delete",
+              type: ["array"],
+              description: "Optional (empty array if none). An array of sections of the code to delete",
               items: { 
                 type: "object",
+                additionalProperties: false,
                 description: "A specific section of code to delete",
                 properties: {
                   file: { type: "string", description: "The target file", enum: ["pluginJava", "pluginYML", "configYML"] },
-                  startLine: { type: "integer", description: "The first line to be deleted" },
-                  endLine: { type: "integer", description: "The last line to be deleted" },
+                  startLine: { type: "integer", description: "The first line to be deleted", minimum: 1 },
+                  endLine: { type: "integer", description: "The last line to be deleted", minimum: 1 },
                 },
                 required: ["file", "startLine", "endLine"],
               },
             },
             insertions: {
-              type: "array",
-              description: "An array of sections of code to insert",
+              type: ["array"],
+              description: "Optional (empty array if none). An array of sections of code to insert",
               items: {
                 type: "object",
+                additionalProperties: false,
                 description: "A specific section of code to insert",
                 properties: {
                   file: { type: "string", description: "The target file", enum: ["pluginJava", "pluginYML", "configYML"] },
-                  startLine: { type: "integer", description: "The line to insert code after" },
+                  startLine: { type: "integer", description: "The line to insert code after", minimum: 0 },
                   content: { type: "string", description: "The code to be inserted" },
                 },
                 required: ["file", "startLine", "content"],
               },
             },
             addDependencies: {
-              type: "array",
-              description: `New Maven dependency XML blocks to insert inside pom.xml <dependencies> 
+              type: ["array"],
+              description: `Optional (empty array if none). New Maven dependency XML blocks to insert inside pom.xml <dependencies> 
               (as raw XML). Example format:
               <dependency>
                 <groupId>com.github.placeholderapi</groupId>
@@ -138,27 +143,24 @@ export async function coder(
               items: { type: "string", description: "The specific Maven dependency block to add." },
             },
             removeDependencies: {
-              type: "array",
-              description: "An array of dependencies to remove",
+              type: ["array"],
+              description: "Optional (empty array if none). An array of dependencies to remove",
               items: { type: "integer", description: "The specific dependency to remove" },
             },
           },
+          required: ["pluginDescription", "deletions", "insertions", "addDependencies", "removeDependencies"],
         },
+        strict: true
       },
   ];
 
-  let developerPrompt: string;
-  let tool: {
-    type: string,
-    name: string,
-    description: string,
-    parameters: object
-  };
+  let devInput: string;
+  let tool: OpenAI.Responses.Tool;
 
   let dataResult;
   switch (job) {
     case "createNewPlugin":
-      developerPrompt = `Your job is to create a new Paper 1.20.1 Minecraft plugin called ${pluginName} from the user prompt by calling 
+      devInput = `Your job is to create a new Paper 1.20.1 Minecraft plugin called ${pluginName} from the user prompt by calling 
       the **createNewPlugin** tool. You may use your assisant message to understand the user intent and your past chats to 
       understand the context of the current user message.`;
       tool = toolsArray[0];
@@ -168,7 +170,7 @@ export async function coder(
       if (dataResult.success) {
         data = JSON.stringify(dataResult.result);
       }
-      developerPrompt = `Your job is to edit a Paper 1.20.1 Minecraft plugin called ${pluginName} to fufill the user request by calling 
+      devInput = `Your job is to edit a Paper 1.20.1 Minecraft plugin called ${pluginName} to fufill the user request by calling 
       using the **editPlugin** tool. You may use your assistant message to understand the user intent and your past chats to 
       understand the context of the current user message.
       Rules:
@@ -185,7 +187,7 @@ export async function coder(
       tool = toolsArray[1];
       break;
     case "fixCrash":
-      developerPrompt = `Your job is to fix a Paper 1.20.1 Minecraft plugin called ${pluginName}.
+      devInput = `Your job is to fix a Paper 1.20.1 Minecraft plugin called ${pluginName}.
       You may use the user prompt and assistant message to understand the context of the plugin.
       Maven crashed while trying to build this plugin into a JAR. 
       Call the **editPlugin** tool to fix the plugin.
@@ -196,12 +198,12 @@ export async function coder(
       break;
   }
 
-  if (!developerPrompt || !tool) {
+  if (!devInput || !tool) {
     throw new Error(`Invalid coder job: ${job}`);
   }
 
   // Tools
-  const tools = [
+  const tools: OpenAI.Responses.Tool[] = [
     { type: "web_search" },
     tool,
   ]
@@ -225,75 +227,81 @@ export async function coder(
     currentUserMessage: currentUserMessage
   }, null, 2);
 
-  // Send request to OpenAI API
-  log.response("OPENAI INPUT (CODER)", `|SYSTEM|\n${systemPrompt}\n|DEVELOPER|\n${developerPrompt}\n|USER|\n${userInput}\n|ASSISTANT|\n${JSON.stringify(assistantMessage, null, 2)}`);
+  // Send request to OpenAI
+  log.response(`OPENAI INPUT (CODER)`, `|TOOLS|\n${JSON.stringify(tools, null, 2)}\n|SYSTEM|\n${systemPrompt}\n|DEVELOPER|\n${devInput}\n|USER|\n${userInput}\n|ASSISTANT|\n${assistantInput}`);
   const response = await client.responses.create({
     model: model,
     input: [
       { role: "system", content: systemPrompt },
-      { role: "developer", content: developerPrompt },
+      { role: "developer", content: devInput },
       { role: "user", content: userInput },
-      { role: "assistant", content: JSON.stringify(assistantMessage, null, 2) },
+      { role: "assistant", content: assistantInput }
     ],
     tools: tools
-  } as any);
-  log.response("CODER RESPONSE", response);
+  });
+  log.response(`CODER RESPONSE`, { model: response.model, output: response.output });
 
-  // Call tools
-  const toolCall = (response as any).output.find?.((c: any) => c.type === "function_call" || c.type === "tool_call");
-  if (toolCall) {
-    const args = JSON.parse(toolCall.arguments);
-    let toolResult;
-    switch (toolCall.name) {
-      case "createNewPlugin":
-        toolResult = await plugin.createNew(pluginName, args.pluginDescription, args.pluginJava, args.pluginYML, args?.configYML, args?.dependencies, guildId);
-        if (toolResult.success) {
-          return toolResult; // Success
-        } else if(toolResult.error.code === "ALREADY_EXISTS") {
-          return {
-            name: "createNewPlugin",
-            success: false,
-            error: "The new plugin you tried to create already exists. If you wish to edit a pre-existing plugin, you must call the editPlugin tool, not the createNewPlugin tool."
-          }
-        } else if(toolResult.error.code === "CRASH") {
-          // TO DO: Improve the toolResult system (toolResult.result)
-          return coder("fixCrash", pluginName, assistantMessage, models.coder.high.slow, info, toolResult.error.information);
-        } else {
-          return {
-            name: "createNewPlugin",
-            success: false,
-            error: "A critical error has occurred."
-          }
-        }
-      case "editPlugin":
-        toolResult = await plugin.edit(pluginName, args?.pluginDescription, args?.deletions, args?.insertions, args?.addDependencies, args?.removeDependencies, guildId);
-        if (toolResult.success) {
-          return toolResult;
-        } else if(toolResult.error.code === "CRASH") {
-          // TO DO: Improve the toolResult system (toolResult.result)
-          return coder("fixCrash", pluginName, assistantMessage, models.coder.high.slow, info, toolResult.error.information);
-        } else {
-          return {
-            name: "editPlugin",
-            success: false,
-            error: "A critical error has occurred."
-          }
-        }
-      default:
-        log.error("GPT did not call a valid tool.");
-        return {
-          name: job,
-          success: false,
-          error: "An internal error has occurred."
-        };
-    }
-  } else {
-    log.error("GPT did not call a tool.");
+  // Get tool call
+  function isFunctionToolCall(
+    item: OpenAI.Responses.ResponseOutputItem
+  ): item is OpenAI.Responses.ResponseFunctionToolCall {
+    return item.type === "function_call";
+  }
+  const toolCall: OpenAI.Responses.ResponseFunctionToolCall | undefined = response.output.find?.((c: any) => isFunctionToolCall(c));
+
+  // Handle errors
+  if (!toolCall) {
+    log.error(`GPT did not call a tool.`);
     return {
       name: job,
       success: false,
-      error: "An internal error has occurred."
-    };
+      error: "A critical error has occurred. Do not call this tool again."
+    }
   }
 
+
+  // Execute tool call
+  const args = JSON.parse(toolCall.arguments);
+  let toolResult;
+  switch (toolCall.name) {
+    case "createNewPlugin":
+      toolResult = await plugin.createNew(pluginName, args.pluginDescription, args.pluginJava, args.pluginYML, args?.configYML, args?.dependencies, guildId);
+      if (toolResult.success) {
+        return toolResult; // Success
+      } else if(toolResult.error.code === "ALREADY_EXISTS") {
+        return {
+          name: "createNewPlugin",
+          success: false,
+          error: "The new plugin you tried to create already exists. If you wish to edit a pre-existing plugin, you must call the editPlugin tool, not the createNewPlugin tool."
+        }
+      } else if(toolResult.error.code === "CRASH") {
+        return coder("fixCrash", pluginName, assistantInput, models.coder.high.slow, info, toolResult.error.information);
+      } else {
+        return {
+          name: "createNewPlugin",
+          success: false,
+          error: "A critical error has occurred. Do not call this tool again."
+        }
+      }
+    case "editPlugin":
+      toolResult = await plugin.edit(pluginName, args?.pluginDescription, args?.deletions, args?.insertions, args?.addDependencies, args?.removeDependencies, guildId);
+      if (toolResult.success) {
+        return toolResult;
+      } else if(toolResult.error.code === "CRASH") {
+        return coder("fixCrash", pluginName, assistantInput, models.coder.high.slow, info, toolResult.error.information);
+      } else {
+        return {
+          name: "editPlugin",
+          success: false,
+          error: "A critical error has occurred. Do not call this tool again."
+        }
+      }
+    default:
+      log.error("GPT did not call a valid tool.");
+      return {
+        name: job,
+        success: false,
+        error: "A critical error has occurred. Do not call this tool again."
+      };
+  }
 }

@@ -493,6 +493,7 @@ plugin.edit = async function(
     }
   })
   if (!pluginInfo) return { success: false, name: "editPlugin", error: { information: "An unknown error has occurred. Do not call this tool again.", code: "UNKOWN" }}
+  pluginDescription.trim();
   if (!pluginDescription?.length) pluginDescription = pluginInfo.description;
 
   // Each edit bumps the stored semver patch so generated jars stay unique.
