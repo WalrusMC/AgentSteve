@@ -4,8 +4,8 @@ import { plugin } from "../tools/plugin.js";
 import { models } from "../models.js";
 import type { AgentInfo, ToolResult } from "../types.js";
 import type { PluginDB } from "../tools/plugin.js";
-import { gptResponse } from "../utils/gptResponse.js";
 
+const client = new OpenAI;
 const log = createLogger("coder");
 
 const systemPrompt = `You are Steve, an AI assistant who lives on Discord and assists Minecraft server owners. 
@@ -47,6 +47,7 @@ export async function coder(
       description: `Creates a new Paper 1.20.1 Minecraft plugin called ${pluginName}.`,
       parameters: {
         type: "object",
+        additionalProperties: false,
         properties: {
           pluginDescription: {
             type: "string",
@@ -67,12 +68,12 @@ export async function coder(
             description: `The code for plugin.yml. Must include main: com.walrusmc.${pluginName.toLowerCase()}.${pluginName}`,
           },
           configYML: {
-            type: "string",
-            description: "Optional. The code for config.yml",
+            type: ["string"],
+            description: "Optional (empty string if none). The code for config.yml.",
           },
           dependencies: { 
-            type: "array", 
-            description: `Optional. Additional Maven dependency XML blocks to insert inside pom.xml <dependencies> 
+            type: ["array"], 
+            description: `Optional (empty array if none). Additional Maven dependency XML blocks to insert inside pom.xml <dependencies>
             (as raw XML). DO NOT include paper-api (1.20.1) or adventure-api (these are already included), but include any other dependencies your code requires. Example format:
             <dependency>
               <groupId>com.github.placeholderapi</groupId>
@@ -83,7 +84,7 @@ export async function coder(
             items: { type: "string", description: "A single Maven <dependency>...</dependency> XML block as raw text."},
           },
         },
-        required: ["pluginJava", "pluginYML", "pluginDescription"],
+        required: ["pluginJava", "pluginYML", "pluginDescription", "configYML", "dependencies"],
       },
       strict: true
     },
@@ -93,42 +94,45 @@ export async function coder(
         description: "Makes changes to a plugin via deletions and insertions. The correct package is com.walrusmc.",
         parameters: {
           type: "object",
+          additionalProperties: false,
           properties: {
             pluginDescription: {
-              type: "string",
-              description: "Optional. An updated 1-5 sentence description of the entire plugin. If this is ommitted, the original description will be used.",
+              type: ["string"],
+              description: "Optional (empty string if none). An updated 1-5 sentence description of the entire plugin. If this is ommitted, the original description will be used.",
             },
             deletions: {
-              type: "array",
-              description: "An array of sections of the code to delete",
+              type: ["array"],
+              description: "Optional (empty array if none). An array of sections of the code to delete",
               items: { 
                 type: "object",
+                additionalProperties: false,
                 description: "A specific section of code to delete",
                 properties: {
                   file: { type: "string", description: "The target file", enum: ["pluginJava", "pluginYML", "configYML"] },
-                  startLine: { type: "integer", description: "The first line to be deleted" },
-                  endLine: { type: "integer", description: "The last line to be deleted" },
+                  startLine: { type: "integer", description: "The first line to be deleted", minimum: 1 },
+                  endLine: { type: "integer", description: "The last line to be deleted", minimum: 1 },
                 },
                 required: ["file", "startLine", "endLine"],
               },
             },
             insertions: {
-              type: "array",
-              description: "An array of sections of code to insert",
+              type: ["array"],
+              description: "Optional (empty array if none). An array of sections of code to insert",
               items: {
                 type: "object",
+                additionalProperties: false,
                 description: "A specific section of code to insert",
                 properties: {
                   file: { type: "string", description: "The target file", enum: ["pluginJava", "pluginYML", "configYML"] },
-                  startLine: { type: "integer", description: "The line to insert code after" },
+                  startLine: { type: "integer", description: "The line to insert code after", minimum: 0 },
                   content: { type: "string", description: "The code to be inserted" },
                 },
                 required: ["file", "startLine", "content"],
               },
             },
             addDependencies: {
-              type: "array",
-              description: `New Maven dependency XML blocks to insert inside pom.xml <dependencies> 
+              type: ["array"],
+              description: `Optional (empty array if none). New Maven dependency XML blocks to insert inside pom.xml <dependencies> 
               (as raw XML). Example format:
               <dependency>
                 <groupId>com.github.placeholderapi</groupId>
@@ -139,11 +143,12 @@ export async function coder(
               items: { type: "string", description: "The specific Maven dependency block to add." },
             },
             removeDependencies: {
-              type: "array",
-              description: "An array of dependencies to remove",
+              type: ["array"],
+              description: "Optional (empty array if none). An array of dependencies to remove",
               items: { type: "integer", description: "The specific dependency to remove" },
             },
           },
+          required: ["pluginDescription", "deletions", "insertions", "addDependencies", "removeDependencies"],
         },
         strict: true
       },
@@ -223,13 +228,36 @@ export async function coder(
   }, null, 2);
 
   // Send request to OpenAI
-  const response = await gptResponse("moderate", message, models.general.medium.slow, tools, systemPrompt, devInput, userInput, assistantInput);
-  if (!response.success) return {
-    name: job,
-    success: false,
-    error: "A critical error has occurred. Do not call this tool again."
-  };
-  const toolCall = response.toolCall;
+  log.response(`OPENAI INPUT (CODER)`, `|TOOLS|\n${JSON.stringify(tools, null, 2)}\n|SYSTEM|\n${systemPrompt}\n|DEVELOPER|\n${devInput}\n|USER|\n${userInput}\n|ASSISTANT|\n${assistantInput}`);
+  const response = await client.responses.create({
+    model: model,
+    input: [
+      { role: "system", content: systemPrompt },
+      { role: "developer", content: devInput },
+      { role: "user", content: userInput },
+      { role: "assistant", content: assistantInput }
+    ],
+    tools: tools
+  });
+  log.response(`CODER RESPONSE`, { model: response.model, output: response.output });
+
+  // Get tool call
+  function isFunctionToolCall(
+    item: OpenAI.Responses.ResponseOutputItem
+  ): item is OpenAI.Responses.ResponseFunctionToolCall {
+    return item.type === "function_call";
+  }
+  const toolCall: OpenAI.Responses.ResponseFunctionToolCall | undefined = response.output.find?.((c: any) => isFunctionToolCall(c));
+
+  // Handle errors
+  if (!toolCall) {
+    log.error(`GPT did not call a tool.`);
+    return {
+      name: job,
+      success: false,
+      error: "A critical error has occurred. Do not call this tool again."
+    }
+  }
 
 
   // Execute tool call

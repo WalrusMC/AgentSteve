@@ -7,7 +7,8 @@ import { models } from "../models.js";
 import { server } from "../tools/server.js";
 import type { AgentInfo, ResponderResponse, ToolResult } from "../types.js";
 import { prisma } from "../../lib/prisma.js";
-import { gptResponse } from "../utils/gptResponse.js";
+
+const client = new OpenAI;
 const log = createLogger("moderate");
 
 const systemPrompt = `You are Steve, an advanced multi-model AI assistant for Minecraft server owners.
@@ -149,13 +150,14 @@ export async function moderate(info: AgentInfo, toolHistory: ToolResult<any, any
       description: "Respond to the user.",
       parameters: {
         type: "object",
+        additionalProperties: false,
         properties: {
           responseText: { 
             type: "string", 
             description: "The textual response that will be sent to the user."},
           files: { 
-            type: "array",
-            description: "Optional. An array of any files that need to be sent to the user.",
+            type: ["array"],
+            description: "Optional (empty array if none). An array of any files that need to be sent to the user.",
             items: { 
               type: "string",
               enum: downloads.map(download => download.file),
@@ -163,7 +165,7 @@ export async function moderate(info: AgentInfo, toolHistory: ToolResult<any, any
             },
           },
         },
-        required: ["responseText"],
+        required: ["responseText", "files"],
       },
       strict: true
     },
@@ -173,6 +175,7 @@ export async function moderate(info: AgentInfo, toolHistory: ToolResult<any, any
       description: "Creates a brand new Paper 1.20.1 Minecraft plugin JAR based on user request.",
       parameters: {
         type: "object",
+        additionalProperties: false,
         properties: {
           pluginName: {
             type: "string",
@@ -180,6 +183,7 @@ export async function moderate(info: AgentInfo, toolHistory: ToolResult<any, any
           },
           assistantMessage: {
             type: "object",
+            additionalProperties: false,
             properties: {
               intent: {
                 type: "string",
@@ -225,6 +229,7 @@ export async function moderate(info: AgentInfo, toolHistory: ToolResult<any, any
       description: "Edits a pre-existing Paper 1.20.1 Minecraft plugin JAR based on user request.",
       parameters: {
         type: "object",
+        additionalProperties: false,
         properties: {
           pluginName: {
             type: "string",
@@ -233,6 +238,7 @@ export async function moderate(info: AgentInfo, toolHistory: ToolResult<any, any
           },
           assistantMessage: {
             type: "object",
+            additionalProperties: false,
             properties: {
               intent: {
                 type: "string",
@@ -278,6 +284,7 @@ export async function moderate(info: AgentInfo, toolHistory: ToolResult<any, any
       description: "Clarify something with the user. Only call this if you are unsure about what the user is asking.",
       parameters: {
         type: "object",
+        additionalProperties: false,
         properties: {
           question: {
             type: "string",
@@ -294,6 +301,7 @@ export async function moderate(info: AgentInfo, toolHistory: ToolResult<any, any
       description: "Retrieve a Google document's content by its ID.",
       parameters: {
         type: "object",
+        additionalProperties: false,
         properties: {
             ids: {
               type: "array",
@@ -312,9 +320,36 @@ export async function moderate(info: AgentInfo, toolHistory: ToolResult<any, any
   ];
 
   // Send request to OpenAI
-  const response = await gptResponse("moderate", message, models.general.medium.slow, tools, systemPrompt, devInput, userInput, assistantInput);
-  if (!response.success) return response.return;
-  const toolCall = response.toolCall;
+    log.response(`OPENAI INPUT (MODERATE)`, `|TOOLS|\n${JSON.stringify(tools, null, 2)}\n|SYSTEM|\n${systemPrompt}\n|DEVELOPER|\n${devInput}\n|USER|\n${userInput}\n|ASSISTANT|\n${assistantInput}`);
+  const response = await client.responses.create({
+    model: models.general.medium.slow,
+    input: [
+      { role: "system", content: systemPrompt },
+      { role: "developer", content: devInput },
+      { role: "user", content: userInput },
+      { role: "assistant", content: assistantInput }
+    ],
+    tools: tools
+  });
+  log.response(`MODERATE RESPONSE`, { model: response.model, output: response.output });
+
+  // Get tool call
+  function isFunctionToolCall(
+    item: OpenAI.Responses.ResponseOutputItem
+  ): item is OpenAI.Responses.ResponseFunctionToolCall {
+    return item.type === "function_call";
+  }
+  const toolCall: OpenAI.Responses.ResponseFunctionToolCall | undefined = response.output.find?.((c: any) => isFunctionToolCall(c));
+
+  // Handle errors
+  if (!toolCall) {
+    log.error(`GPT did not call a tool.`);
+    return {
+      messages: await sendMsgDiscord("Oh no! An error has occured.", message),
+      isClarification: false,
+      responder: "moderate"
+    }
+  }
 
   // Execute tool call
   const args = JSON.parse(toolCall.arguments);
@@ -328,7 +363,7 @@ export async function moderate(info: AgentInfo, toolHistory: ToolResult<any, any
       };
     case "editPlugin":
     case "createNewPlugin":
-      toolResult = await coder(toolCall.name, args.pluginName, args.assistantMessage, args.complex ? models.coder.high.slow : models.coder.medium.slow, info);
+      toolResult = await coder(toolCall.name, args.pluginName, JSON.stringify(args.assistantMessage, null, 2), args.complex ? models.coder.high.slow : models.coder.medium.slow, info);
       if (toolResult.success) {
         // TO DO: Improve the toolResult system (toolResult.result)
         toolHistory.push({ ...toolResult, name: toolCall.name});

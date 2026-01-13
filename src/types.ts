@@ -25,10 +25,8 @@ export type AgentInfo = {
 export type ResponderResponse = {
   messages: Message<boolean>[] | false;
   isClarification: boolean;
-  responder: Responder;
+  responder: "nano" | "moderate" | "complex";
 };
-
-export type Responder = "nano" | "moderate" | "complex";
 
 /** TOOLS **/
 // General Tools

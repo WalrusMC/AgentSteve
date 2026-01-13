@@ -5,8 +5,8 @@ import { moderate } from "./moderate.js";
 import { models } from "../models.js";
 import type { AgentInfo, ResponderResponse, ToolResult } from "../types.js";
 import { prisma } from "../../lib/prisma.js";
-import { gptResponse } from "../utils/gptResponse.js";
 
+const client = new OpenAI;
 const log = createLogger("nano");
 
 const systemPrompt = `You are Steve, an AI assistant for Minecraft server owners. You live on Discord and you help users with tasks such as:
@@ -134,38 +134,71 @@ export async function nano(info: AgentInfo, toolHistory: ToolResult<any, any>[])
       name: "respond",
       description: "Respond yourself.",
       parameters: {
+        "additionalProperties": false,
         type: "object",
         properties: {
           responseText: { 
             type: "string", 
             description: "The textual response that will be sent to the user."},
           files: { 
-            type: "array",
-            description: "Optional. An array of any files that need to be sent to the user.",
+            type: ["array"],
+            description: "Optional (empty array if none). An array of any files that need to be sent to the user.",
             items: { 
               type: "string",
-              enum: downloads.map(obj => obj.file),
+              enum: [ ...downloads.map(obj => obj.file)],
               description: "The name of the file you wish to send."
             },
           },
         },
-        required: ["responseText"],
+        required: ["responseText", "files"],
       },
       strict: true
     },
     {
       type: "function",
       name: "moderate",
-      parameters: {},
-      strict: true
+      strict: true,
+      parameters: {
+        type: "object",
+        additionalProperties: false,
+        properties: {},
+        required: []
+      }
     }
   ];
 
 
   // Send request to OpenAI
-  const response = await gptResponse("nano", message, models.general.low.slow, tools, systemPrompt, devInput, userInput, assistantInput);
-  if (!response.success) return response.return;
-  const toolCall = response.toolCall;
+  log.response(`OPENAI INPUT (NANO)`, `|TOOLS|\n${JSON.stringify(tools, null, 2)}\n|SYSTEM|\n${systemPrompt}\n|DEVELOPER|\n${devInput}\n|USER|\n${userInput}\n|ASSISTANT|\n${assistantInput}`);
+  const response = await client.responses.create({
+    model: models.general.low.slow,
+    input: [
+      { role: "system", content: systemPrompt },
+      { role: "developer", content: devInput },
+      { role: "user", content: userInput },
+      { role: "assistant", content: assistantInput }
+    ],
+    tools: tools
+  });
+  log.response(`NANO RESPONSE`, { model: response.model, output: response.output });
+
+  // Get tool call
+  function isFunctionToolCall(
+    item: OpenAI.Responses.ResponseOutputItem
+  ): item is OpenAI.Responses.ResponseFunctionToolCall {
+    return item.type === "function_call";
+  }
+  const toolCall: OpenAI.Responses.ResponseFunctionToolCall | undefined = response.output.find?.((c: any) => isFunctionToolCall(c));
+
+  // Handle errors
+  if (!toolCall) {
+    log.error(`GPT did not call a tool.`);
+    return {
+      messages: await sendMsgDiscord("Oh no! An error has occured.", message),
+      isClarification: false,
+      responder: "nano"
+    }
+  }
 
   // Execute tool call
   const args = JSON.parse(toolCall.arguments);
