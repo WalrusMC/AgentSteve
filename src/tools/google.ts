@@ -83,12 +83,12 @@ gdoc.read = async function(guildId, content, message, ids) {
   };
 
   // Get latest authorization token
-  const user = await prisma.user.findFirst({
+  const user = await prisma.guildUser.findFirst({
     where: {
-      id: message.author.id,
+      userId: message.author.id,
       guildId
     }
-  })
+  });
   let tokensJson = user?.token
   let tokens: Credentials | false = false;
   if (typeof tokensJson === "string") {

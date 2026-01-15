@@ -96,7 +96,7 @@ client.on("messageCreate", async (message) => {
   // Exit if the author is a bot, pinged everyone, or didn't mention Steve
   if (message.author.bot || message.mentions.everyone || !message.guildId) return;
   if (!client.user || !message.mentions.has(client.user)) return;
-  if (!message.member?.permissions?.has(PermissionsBitField.Flags.Administrator)) return await message.reply(":warning: You don't have permission to talk to me right now. Server administrators can give users permission by doing /allow {user}.");
+  if (!message.member?.permissions?.has(PermissionsBitField.Flags.Administrator)) return await message.reply(":warning: You don't have permission to talk to me right now. Only server administrators can talk to me.");
   if (currentlyRunning[`${message.guildId}`]) return await message.reply("Slow down there! I can only answer one question at a time.");
 
   const info: AgentInfo = {
