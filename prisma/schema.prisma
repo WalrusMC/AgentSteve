@@ -15,7 +15,7 @@ model Guild {
   downloads Download[]
   plugins Plugin[]
   servers Server[]
-  users User[]
+  users GuildUser[]
 }
 
 model Download {
@@ -23,7 +23,7 @@ model Download {
   file String
   description String
 
-  guild Guild @relation(fields: [guildId], references: [id])
+  guild Guild @relation(fields: [guildId], references: [id], onDelete: Cascade)
   guildId String
 }
 
@@ -34,23 +34,38 @@ model Plugin {
   description String
   file String
 
-  guild Guild @relation(fields: [guildId], references: [id])
+  guild Guild @relation(fields: [guildId], references: [id], onDelete: Cascade)
   guildId String
 }
 
 model Server {
   id String @id
   information Json
+  consoleHistory ConsoleLine[]
 
-  guild Guild @relation(fields: [guildId], references: [id])
+  guild Guild @relation(fields: [guildId], references: [id], onDelete: Cascade)
   guildId String
 }
 
-model User {
-  id String @id
-  token Json
+model ConsoleLine {
+  id Int @id @default(autoincrement())
+  createdAt DateTime @default(now())
+  line String
+
+  server Server @relation(fields: [serverId], references: [id], onDelete: Cascade)
+  serverId String
+  @@index([serverId, createdAt])
+}
+
+model GuildUser {
+  id Int @id @default(autoincrement())
+
+  token Json?
+
+  userId String
 
   guild Guild @relation(fields: [guildId], references: [id])
   guildId String
-}
 
+  @@unique([userId, guildId])
+}

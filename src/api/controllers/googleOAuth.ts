@@ -33,19 +33,19 @@ export async function googleOAuth(req: any, res: any) {
 
     // Persist tokens under `tokens` for the requesting user (matches gdoc.read)
     const userId = String(user);
-    await prisma.user.upsert({
+    await prisma.guildUser.upsert({
       where: {
-        guildId: guild,
-        id: user
+        userId_guildId: {
+          guildId: guild,
+          userId: user
+        }
       },
       create: {
         guildId: guild,
-        id: user,
+        userId: user,
         token: token
       },
-      update: {
-        token: JSON.stringify(token)
-      }
+      update: { token: JSON.stringify(token) }
     });
 
     return res.sendStatus(204);
