@@ -1,14 +1,12 @@
 import OpenAI from "openai";
-import { getPastChats } from "../utils/getPastChats.js";
 import { models } from "../models.js";
-import type { Message } from "discord.js";
+import { AgentInfo } from "../types.js";
 
 const client = new OpenAI();
 
-export async function classifier(message: Message) {
-
-  // pastChats
-  const pastChats = await getPastChats(message, 700);
+export async function classifier(info: AgentInfo) {
+  const { message } = info;
+  const { pastChats } = info;
 
   // currentUserMessage
   const attachmentNames = message?.attachments?.size 

@@ -128,97 +128,97 @@ export async function nano(info: AgentInfo, toolHistory: ToolResult<any, any>[])
 
 
   // Tools
-  const tools = [
+  const tools: OpenAI.Responses.Tool[] = [
     {
       type: "function",
       name: "respond",
       description: "Respond yourself.",
       parameters: {
+        "additionalProperties": false,
         type: "object",
         properties: {
           responseText: { 
             type: "string", 
             description: "The textual response that will be sent to the user."},
           files: { 
-            type: "array",
-            description: "Optional. An array of any files that need to be sent to the user.",
+            type: ["array"],
+            description: "Optional (empty array if none). An array of any files that need to be sent to the user.",
             items: { 
               type: "string",
-              enum: downloads.map(obj => obj.file),
+              enum: [ ...downloads.map(obj => obj.file)],
               description: "The name of the file you wish to send."
             },
           },
         },
-        required: ["responseText"],
+        required: ["responseText", "files"],
       },
+      strict: true
     },
     {
       type: "function",
       name: "moderate",
+      strict: true,
+      parameters: {
+        type: "object",
+        additionalProperties: false,
+        properties: {},
+        required: []
+      }
     }
   ];
 
 
-  // Send initial route decision request to OpenAI
-  log.debug(`Sending request to ${models.general.low.slow}`);
-  log.response("OPENAI INPUT (NANO)", `|SYSTEM|\n${systemPrompt}\n|DEVELOPER|\n${devInput}\n|USER|\n${userInput}\n|ASSISTANT|\n${assistantInput}`);
+  // Send request to OpenAI
+  log.response(`OPENAI INPUT (NANO)`, `|TOOLS|\n${JSON.stringify(tools, null, 2)}\n|SYSTEM|\n${systemPrompt}\n|DEVELOPER|\n${devInput}\n|USER|\n${userInput}\n|ASSISTANT|\n${assistantInput}`);
   const response = await client.responses.create({
     model: models.general.low.slow,
     input: [
       { role: "system", content: systemPrompt },
       { role: "developer", content: devInput },
       { role: "user", content: userInput },
-      { role: "assistant", content: assistantInput },
+      { role: "assistant", content: assistantInput }
     ],
     tools: tools
-  } as any);
-  log.response("NANO RESPONSE", response);
+  });
+  log.response(`NANO RESPONSE`, { model: response.model, output: response.output });
 
-  // Call tools
-  const toolCall = (response as any)?.output?.find?.((c: any) => c.type === "function_call" || c.type === "tool_call");
-  const responseText = (response as any)?.output?.[1]?.content?.[0]?.text;
-  if (toolCall) {
-    const args = JSON.parse(toolCall.arguments);
-    switch (toolCall.name) {
-      case "respond":
-        log.debug("The nano responder chose to respond itself.");
-        return {
-          messages: await sendMsgDiscord(args.responseText, message, args.files),
-          isClarification: false,
-          responder: "nano"
-        };
-      case "moderate":
-        log.debug("The nano responder decided to forward the message.");
-        return await moderate(info, toolHistory);
-      default:
-        log.error("The nano responder did not call a valid tool.")
-        return {
-          messages: await sendMsgDiscord("Oh no! An error has occured.", message),
-          isClarification: false,
-          responder: "nano"
-        };
-    }
-  } else if (responseText) {
-    switch (responseText) {
-      case "moderate()":
-      case "moderate":
-        log.warn("The nano responder returned output text and decided to forward the message.");
-        return await moderate(info, toolHistory);
-      default:
-        log.error("The nano responder returned output text. Aborting.");
-        return {
-          messages: await sendMsgDiscord("Oh no! An error has occured.", message),
-          isClarification: false,
-          responder: "nano"
-        };
-    }
-  } else {
-    log.error("The nano responder did not call a tool or return output text.");
+  // Get tool call
+  function isFunctionToolCall(
+    item: OpenAI.Responses.ResponseOutputItem
+  ): item is OpenAI.Responses.ResponseFunctionToolCall {
+    return item.type === "function_call";
+  }
+  const toolCall: OpenAI.Responses.ResponseFunctionToolCall | undefined = response.output.find?.((c: any) => isFunctionToolCall(c));
+
+  // Handle errors
+  if (!toolCall) {
+    log.error(`GPT did not call a tool.`);
     return {
       messages: await sendMsgDiscord("Oh no! An error has occured.", message),
       isClarification: false,
       responder: "nano"
-    };
+    }
   }
 
+  // Execute tool call
+  const args = JSON.parse(toolCall.arguments);
+  switch (toolCall.name) {
+    case "respond":
+      log.debug("The nano responder chose to respond itself.");
+      return {
+        messages: await sendMsgDiscord(args.responseText, message, args.files),
+        isClarification: false,
+        responder: "nano"
+      };
+    case "moderate":
+      log.debug("The nano responder decided to forward the message.");
+      return await moderate(info, toolHistory);
+    default:
+      log.error("The nano responder did not call a valid tool.")
+      return {
+        messages: await sendMsgDiscord("Oh no! An error has occured.", message),
+        isClarification: false,
+        responder: "nano"
+      };
+  }
 };
