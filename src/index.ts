@@ -8,6 +8,7 @@ import { getPastChats } from "./utils/getPastChats.js";
 import { gdoc } from "./tools/google.js";
 import { prisma } from "../lib/prisma.js";
 import fs from "fs/promises";
+import { pterodactylWS } from "./tools/server/websocket.js";
 
 import type { AgentInfo, ResponderResponse, ToolResult, ReadDocFail, ReadDocSuccess } from "./types.js";
 
@@ -98,6 +99,14 @@ client.on("messageCreate", async (message) => {
   if (!client.user || !message.mentions.has(client.user)) return;
   if (!message.member?.permissions?.has(PermissionsBitField.Flags.Administrator)) return await message.reply(":warning: You don't have permission to talk to me right now. Only server administrators can talk to me.");
   if (currentlyRunning[`${message.guildId}`]) return await message.reply("Slow down there! I can only answer one question at a time.");
+
+  const servers = await prisma.server.findMany({
+    where: {
+      guildId: message.guildId
+    }
+  });
+
+  pterodactylWS.connect(servers.map(obj => obj.id));
 
   const info: AgentInfo = {
     guildId: message.guildId,

@@ -1,3 +1,4 @@
 Just some small "to dos" that anyone thinks of.
 
 
+Add safety for message.replying if a message is deleted (message.channel.send with a ping)
