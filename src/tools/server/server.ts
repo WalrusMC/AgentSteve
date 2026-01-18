@@ -1,8 +1,9 @@
 import "dotenv/config";
-import fsp from "fs/promises";
 import axios from "axios";
-import { createLogger } from "../utils/logger.js";
-import { prisma } from "../../lib/prisma.js";
+import { createLogger } from "../../utils/logger.js";
+import { prisma } from "../../../lib/prisma.js";
+import { pterodactylWS } from "./websocket.js";
+import { version } from "node:os";
 
 const log = createLogger("Server Tool");
 
@@ -23,15 +24,11 @@ export const server: any = {};
 /** MISC **/
 // Read accessible servers from ./db/${guildId}/servers.json
 const readServers = async (guildId: string) => {
-  try {
-    return await prisma.server.findMany({
-      where: {
-        guildId
-      }
-    })
-  } catch {
-    return [];
-  }
+  return await prisma.server.findMany({
+    where: {
+      guildId
+    }
+  })
 };
 
 /**
@@ -43,10 +40,8 @@ server.addNew = async function (guildId: string, serverId: string) {
   const serverIds = servers.map(obj => obj.id);
 
   let serverDetails: any;
-  let serverStartup: any;
   try {
     serverDetails = await api.get(`/servers/${serverId}/`);
-    serverStartup = await api.get(`/servers/${serverId}/startup`);
   } catch (err: any) {
     const status = err?.response?.status;
     if (serverIds.includes(serverId)) {
@@ -84,6 +79,9 @@ server.addNew = async function (guildId: string, serverId: string) {
   try {
     accessText = await api.get(`/servers/${serverId}/files/contents`, {
       params: { file: "/agentsteve.txt" },
+      // Ensure we treat the response as plain text. If the file contains only digits,
+      // Axios/JSON parsing can coerce it into a Number and lose precision (Discord snowflakes > 2^53).
+      responseType: "text",
     });
   } catch (err: any) {
     const status = err?.response?.status;
@@ -92,31 +90,46 @@ server.addNew = async function (guildId: string, serverId: string) {
     if (status === 500) return "500";
     log.error(err);
     if (status === 401) return "INVALID_KEY";
+    log.error(`An unkown error has occurred while trying to read a file for guild ${guildId} on server ${serverId}`);
     return "UNKNOWN";
   }
 
   // Write information to db/guildId/servers.json
-  if ((String(accessText.data) || "").trim() === String(guildId)) {
+  log.debug(`This is the key recieved: ${String(accessText.data)}. This is the target guild: ${guildId}`);
+  if (!String(accessText.data)) {
+    log.error(`There was an error reading the agentsteve.txt file or it was blank for guild ${guildId} on server ${serverId}.`);
+    return "INCORRECT_FILE";
+  }
+  if ((String(accessText.data)).trim() === String(guildId)) {
 
-    // Get server type and version
-    const startupVars = Object.fromEntries(
-      serverStartup.data.data.map((v: any) => [
-        v.attributes.env_variable,
-        v.attributes.server_value
-      ])
-    );
-    const serverJar = startupVars.SERVER_JARFILE ?? null;
-    const minecraftVersion =
-      startupVars.MINECRAFT_VERSION ??
-      startupVars.MC_VERSION ??
-      null;
+    // Get server version info
+    const versionCommandResult = await pterodactylWS.sendCommand(serverId, "version");
+    let type = "UNKNOWN";
+    let version = "UNKNOWN";
+    if (versionCommandResult.success) {
+      if (versionCommandResult.result.includes("This server is running")) {
+        const getType = versionCommandResult.result.match(new RegExp(`running (.*?) version`, 's'));
+        if (getType && getType[1]) type = getType[1];
+        const getVersion = versionCommandResult.result.match(new RegExp(`version (.*?)-`, 's'));
+        if (getVersion && getVersion[1]) version = getVersion[1];
+      } else {
+        type = "UNKNOWN";
+        version = "UNKNOWN";
+      }
+    } else {
+      type = "UNKNOWN";
+      version = "UNKNOWN";
+    }
 
     // Add server to servers from servers.json
-    prisma.server.create({
+    await prisma.server.create({
       data: {
         information: JSON.stringify({
+          id: serverId,
           name: serverName,
           description: serverDetails.data.attributes.description,
+          type,
+          version,
           specs: {
             memory: serverDetails.data.attributes.limits.memory,
             disk: serverDetails.data.attributes.limits.disk,
@@ -128,11 +141,11 @@ server.addNew = async function (guildId: string, serverId: string) {
             notes: data.attributes.notes,
             is_primary: data.attributes.is_default
           })),
-          serverJar,
-          minecraftVersion
         }, null, 2),
         guildId,
-        id: serverId
+        id: serverId,
+        version,
+        type
       }
     })
 
@@ -143,7 +156,7 @@ server.addNew = async function (guildId: string, serverId: string) {
       return "ACCESS_GRANTED";
     }
 
-    log.error(JSON.stringify(data, null, 2));
+    log.error(`The agentsteve.txt file could not be deleted. ${JSON.stringify(data, null, 2)}`);
     return "INTERNAL_SERVER_ERROR";
   }
 
@@ -152,11 +165,11 @@ server.addNew = async function (guildId: string, serverId: string) {
 
 // Checks if a serverId matches an accessible server
 server.check = async function (guildId: string, serverId: string) {
-  const serverIds = Object.keys(await readServers(guildId));
+  const serverIds = (await readServers(guildId)).map(obj => obj.id);
   return serverIds.includes(serverId);
 };
 
-// Updates and returns servers.json
+// Updates and returns information about all servers belonging to a specific guild
 server.readAndUpdate = async function (guildId: string) {
   const servers = await prisma.server.findMany({
     where: {
@@ -170,10 +183,8 @@ server.readAndUpdate = async function (guildId: string) {
 
 
     let serverDetails: any;
-    let serverStartup: any;
     try {
       serverDetails = await api.get(`/servers/${id}/`);
-      serverStartup = await api.get(`/servers/${id}/startup`);
     } catch (err) {
       await prisma.server.delete({
         where: {
@@ -184,22 +195,26 @@ server.readAndUpdate = async function (guildId: string) {
       continue;
     }
 
-    // Get server type and version
-    const startupVars = Object.fromEntries(
-      serverStartup.data.data.map((v: any) => [
-        v.attributes.env_variable,
-        v.attributes.server_value
-      ])
-    );
-    const serverJar = startupVars.SERVER_JARFILE ?? null;
-    const minecraftVersion =
-      startupVars.MINECRAFT_VERSION ??
-      startupVars.MC_VERSION ??
-      null;
+    // Get server version info
+    const versionCommandResult = await pterodactylWS.sendCommand(id, "version");
+    let type = "UNKNOWN";
+    let version = "UNKNOWN";
+    if (versionCommandResult.success) {
+      if (versionCommandResult.result.includes("This server is running")) {
+        const getType = versionCommandResult.result.match(new RegExp(`running (.*?) version`, 's'));
+        if (getType && getType[1]) type = getType[1];
+        const getVersion = versionCommandResult.result.match(new RegExp(`version (.*?)-`, 's'));
+        if (getVersion && getVersion[1]) version = getVersion[1];
+      }
+    }
 
+    // Create new info JSON object
     const updatedServerInfo = JSON.stringify({
+      id,
       name: serverDetails?.data?.attributes?.name,
       description: serverDetails.data.attributes.description,
+      type,
+      version,
       specs: {
         memory: serverDetails.data.attributes.limits.memory,
         disk: serverDetails.data.attributes.limits.disk,
@@ -211,8 +226,6 @@ server.readAndUpdate = async function (guildId: string) {
         notes: data.attributes.notes,
         is_primary: data.attributes.is_default
       })),
-      serverJar, // TODO: Change
-      minecraftVersion // TODO:  Change
     }, null, 2);
 
     // Update server
@@ -222,11 +235,12 @@ server.readAndUpdate = async function (guildId: string) {
         id
       },
       data: {
-        information: updatedServerInfo
+        information: updatedServerInfo,
+        version,
+        type
       }
     })
-    serversArray.push({id, information: updatedServerInfo})
-    // TODO: How we get version and server software type must be redesigned as those egg env vars do not exist. We must execute /version console command to get server version and software
+    serversArray.push(updatedServerInfo)
   };
 
   return serversArray;

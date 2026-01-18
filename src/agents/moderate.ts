@@ -4,7 +4,7 @@ import { coder } from "./coder.js"
 import { createLogger } from "../utils/logger.js";
 import { gdoc } from "../tools/google.js";
 import { models } from "../models.js";
-import { server } from "../tools/server.js";
+import { server } from "../tools/server/server.js";
 import type { AgentInfo, ResponderResponse, ToolResult } from "../types.js";
 import { prisma } from "../../lib/prisma.js";
 
@@ -87,7 +87,7 @@ export async function moderate(info: AgentInfo, toolHistory: ToolResult<any, any
   });
 
   // Servers
-  const servers = await server.readAndUpdate(message.guildId) // {Object}
+  const servers: string[] = await server.readAndUpdate(message.guildId)
   
   log.debug("Moderate started for message", message.id);
 

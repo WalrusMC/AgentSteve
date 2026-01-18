@@ -1,4 +1,4 @@
-import { server} from "../../tools/server.js";
+import { server} from "../../tools/server/server.js";
 
 // Server Access Checker
 export async function serverAccessChecker(req: any, res: any) {
