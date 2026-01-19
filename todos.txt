@@ -7,3 +7,5 @@ Fix dependencies for plugins (Add <repositories></repositories>)
 
 Add default plugins (Like simple voice chat)
 
+For plugin creation, seperate into different files with a clean, reusable folder structure like (myPlugin/myPlugin.java, myPlugin/commands, myPlugin/utils, myPlugin/listeners)
+
