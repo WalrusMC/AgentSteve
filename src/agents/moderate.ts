@@ -65,11 +65,12 @@ BEHAVIOR RULES
 export async function moderate(info: AgentInfo, toolHistory: ToolResult<any, any>[] = [], devOverride?: string | false): Promise<ResponderResponse> {
   const { message } = info;
   const { pastChats } = info;
+  const { guildId } = info;
 
   // Downloads
   const downloads = (await prisma.download.findMany({
     where: {
-      guildId: info.guildId
+      guildId: guildId
     }
   })).map(download => {
     const { id, guildId, ...rest} = download;
@@ -87,7 +88,8 @@ export async function moderate(info: AgentInfo, toolHistory: ToolResult<any, any
   });
 
   // Servers
-  const servers: string[] = await server.readAndUpdate(message.guildId)
+  const servers = await server.readAndUpdate(guildId)
+  const serversInformation = servers.map(obj => obj.information);
   
   log.debug("Moderate started for message", message.id);
 
@@ -115,20 +117,7 @@ export async function moderate(info: AgentInfo, toolHistory: ToolResult<any, any
   // Dev Input
   const devInput = !devOverride ? JSON.stringify({
     instructions: developerPrompt,
-    information: {
-      plugins: {
-        description: "Plugins you have access to.",
-        content: plugins
-      },
-      downloads: {
-        description: "Downloaded files you have access to.",
-        content: downloads
-      },
-      servers: {
-        description: "Remote Minecraft servers you have access to.",
-        content: servers
-      }
-    }
+    //information: {} // TODO: Information and default plugins and stuff idk
   }, null, 2) : devOverride;
 
   // Assistant Input
@@ -137,7 +126,24 @@ export async function moderate(info: AgentInfo, toolHistory: ToolResult<any, any
 
     toolHistory: {
       noteToSelf: "These are tools I just called to answer the current user request and their results.",
-      ...toolHistory
+      content: [...toolHistory]
+    },
+    resources: {
+      noteToSelf: "These are the resources in their current state that I have access to.",
+      content: {
+        plugins: {
+          description: "Plugins I created.",
+          content: plugins
+        },
+        downloads: {
+          description: "Files I downloaded.",
+          content: downloads
+        },
+        servers: {
+          description: "Minecraft servers I have access to.",
+          content: serversInformation
+        }
+      }
     }
   }, null, 2);
 
@@ -380,15 +386,13 @@ export async function moderate(info: AgentInfo, toolHistory: ToolResult<any, any
       };
     case "readDoc":
       // TO DO: Add summarizer for really big documents.
-      // TO DO: Fix tool results for document reading capabilities!!!!
       toolResult = await gdoc.read(info.guildId, false, message, args.ids);
       if (toolResult.success) {
-        // TO DO: Improve the toolResult system (toolResult.result)
         if (toolResult.result.size > 20000) {
           toolHistory.push({
             name: "readDoc",
             success: false,
-            error: `The requested document/documents (${args.ids}) was/were too big. Documents should be a maximum of ~15,000.`
+            error: `The requested document/documents (${args.ids}) was/were too big (${toolResult.result.size}). Documents should be a maximum of ~15,000 characters in total. Here are the individual sizes of each document you requested: ${toolResult.result}`
           });
           return await moderate(info, toolHistory, devInput);
         } else {

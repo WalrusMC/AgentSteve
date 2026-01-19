@@ -19,7 +19,66 @@ const api = axios.create({
   },
 });
 
-export const server: any = {};
+export type AddNewServerResult =
+  | "NO_ACCESS"
+  | "NO_SERVER"
+  | "INVALID_KEY"
+  | "500"
+  | "UNKNOWN"
+  | "ALREADY_ACCESSIBLE"
+  | "NO_FILE"
+  | "ACCESS_GRANTED"
+  | "INTERNAL_SERVER_ERROR"
+  | "INCORRECT_FILE";
+
+export type ServerToolResponse<T> =
+  | { success: true; result: T; code: number }
+  | { success: false; result: string; code: number };
+
+export type ReadFilesResult =
+  | { success: false; result: string; code: number }
+  | {
+      success: boolean;
+      result: Array<{ success: boolean; path: string; contents: unknown; code: number }>;
+    };
+
+export interface ServerTool {
+  addNew(guildId: string, serverId: string): Promise<AddNewServerResult>;
+  check(guildId: string, serverId: string): Promise<boolean>;
+  readAndUpdate(
+    guildId: string,
+  ): Promise<Array<{ information: string; version: string; type: string }>>;
+  deleteFiles(
+    guildId: string,
+    serverId: string,
+    files: string[] | string,
+  ): Promise<ServerToolResponse<string>>;
+  readFiles(
+    guildId: string,
+    serverId: string,
+    files: string[] | string,
+  ): Promise<ReadFilesResult>;
+  readFile(serverId: string, file: string): Promise<ServerToolResponse<unknown>>;
+  writeFile(
+    guildId: string,
+    serverId: string,
+    file: string,
+    content: unknown,
+  ): Promise<ServerToolResponse<string>>;
+  uploadFile(
+    guildId: string,
+    serverId: string,
+    sourceFile: string,
+    targetPath: string,
+  ): Promise<ServerToolResponse<string>>;
+  downloadFile(
+    guildId: string,
+    serverId: string,
+    file: string,
+  ): Promise<ServerToolResponse<string>>;
+}
+
+export const server = {} as ServerTool;
 
 /** MISC **/
 // Read accessible servers from ./db/${guildId}/servers.json
@@ -240,7 +299,11 @@ server.readAndUpdate = async function (guildId: string) {
         type
       }
     })
-    serversArray.push(updatedServerInfo)
+    serversArray.push({
+        information: updatedServerInfo,
+        version,
+        type
+      });
   };
 
   return serversArray;

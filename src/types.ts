@@ -29,7 +29,6 @@ export type ResponderResponse = {
 };
 
 /** TOOLS **/
-// General Tools
 export type ToolSuccess<T> = {
   success: true;
   result: T;
@@ -43,25 +42,3 @@ export type ToolError<E> = {
 export type ToolResult<T, E> = {
   name: string;
 } & (ToolSuccess<T> | ToolError<E>);
-
-// G Docs
-export type ReadDocSuccess = {
-  size: number;
-  documents: {
-    title: string;
-    id: string;
-    link: string;
-    tabs: DocTabs;
-  }[]
-};
-
-export type DocTabs = {
-  title: string;
-  content: string;
-  subTabs?: DocTabs;
-}[];
-
-export type ReadDocFail = {
-  reason: "NO_DOCS" | "NO_AUTH" | "NOT_FOUND" | "FORBIDDEN" | "UNKNOWN";
-  code: number;
-};

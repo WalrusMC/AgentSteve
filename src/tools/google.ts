@@ -2,7 +2,7 @@ import { google } from "googleapis";
 import fs from "fs/promises";
 import { prisma } from "../../lib/prisma.js";
 import type { Message } from "discord.js";
-import type { ToolResult, ReadDocFail, ReadDocSuccess, DocTabs } from "../types.js";
+import type { ToolResult } from "../types.js";
 import type { Credentials } from "google-auth-library";
 
 
@@ -16,6 +16,28 @@ interface Gdoc {
     ): Promise<ToolResult<ReadDocSuccess, ReadDocFail>>;
     extractIds(content: string): string[];
 }
+
+export type ReadDocSuccess = {
+  sizePerDocument: { [key: string]: string };
+  size: number;
+  documents: {
+    title: string;
+    id: string;
+    link: string;
+    tabs: DocTabs;
+  }[]
+};
+
+export type DocTabs = {
+  title: string;
+  content: string;
+  subTabs?: DocTabs;
+}[];
+
+export type ReadDocFail = {
+  reason: "NO_DOCS" | "NO_AUTH" | "NOT_FOUND" | "FORBIDDEN" | "UNKNOWN";
+  code: number;
+};
 
 const KEY_FILE = JSON.parse(await fs.readFile("./google-key-file.json", "utf8")).web;
 const CLIENT_SECRET = KEY_FILE.client_secret;
@@ -196,11 +218,18 @@ gdoc.read = async function(guildId, content, message, ids) {
     }
   };
 
+
+  const sizePerDocument: { [key: string]: string } = {};
+  for (const doc of documents) {
+    sizePerDocument[doc.id] = String(JSON.stringify(doc).length)
+  }
+
   // Return the final document object
   return {
     name: "gdoc.read",
     success: true,
     result: {
+      sizePerDocument,
       size: JSON.stringify(documents).length,
       documents: documents
     }
