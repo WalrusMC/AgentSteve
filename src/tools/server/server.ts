@@ -47,7 +47,7 @@ export interface ServerTool {
   check(guildId: string, serverId: string): Promise<boolean>;
   readAndUpdate(
     guildId: string,
-  ): Promise<Array<{ information: string; version: string; type: string }>>;
+  ): Promise<Array<{ information: string; version: string; type: string; isOnline: boolean }>>;
   deleteFiles(
     guildId: string,
     serverId: string,
@@ -161,23 +161,28 @@ server.addNew = async function (guildId: string, serverId: string) {
   }
   if ((String(accessText.data)).trim() === String(guildId)) {
 
+    // isOnline
+    const isOnline = serverDetails.data.attributes.status === "running"
+
     // Get server version info
-    const versionCommandResult = await pterodactylWS.sendCommand(serverId, "version");
     let type = "UNKNOWN";
     let version = "UNKNOWN";
-    if (versionCommandResult.success) {
-      if (versionCommandResult.result.includes("This server is running")) {
-        const getType = versionCommandResult.result.match(new RegExp(`running (.*?) version`, 's'));
-        if (getType && getType[1]) type = getType[1];
-        const getVersion = versionCommandResult.result.match(new RegExp(`version (.*?)-`, 's'));
-        if (getVersion && getVersion[1]) version = getVersion[1];
+    if (isOnline) {
+      const versionCommandResult = await pterodactylWS.sendCommand(serverId, "version");
+      if (versionCommandResult.success) {
+        if (versionCommandResult.result.includes("This server is running")) {
+          const getType = versionCommandResult.result.match(new RegExp(`running (.*?) version`, 's'));
+          if (getType && getType[1]) type = getType[1];
+          const getVersion = versionCommandResult.result.match(new RegExp(`version (.*?)-`, 's'));
+          if (getVersion && getVersion[1]) version = getVersion[1];
+        } else {
+          type = "UNKNOWN";
+          version = "UNKNOWN";
+        }
       } else {
         type = "UNKNOWN";
         version = "UNKNOWN";
       }
-    } else {
-      type = "UNKNOWN";
-      version = "UNKNOWN";
     }
 
     // Add server to servers from servers.json
@@ -187,8 +192,9 @@ server.addNew = async function (guildId: string, serverId: string) {
           id: serverId,
           name: serverName,
           description: serverDetails.data.attributes.description,
-          type,
-          version,
+          type: isOnline ? type : "Type unknown: server is not running",
+          version: isOnline ? type : "Version unknown: server not running",
+          status: serverDetails.data.atrributes.status,
           specs: {
             memory: serverDetails.data.attributes.limits.memory,
             disk: serverDetails.data.attributes.limits.disk,
@@ -204,7 +210,8 @@ server.addNew = async function (guildId: string, serverId: string) {
         guildId,
         id: serverId,
         version,
-        type
+        type,
+        isOnline
       }
     })
 
@@ -254,16 +261,47 @@ server.readAndUpdate = async function (guildId: string) {
       continue;
     }
 
+    // isOnline
+    const isOnline = serverDetails.data.attributes.status === "running"
+
     // Get server version info
-    const versionCommandResult = await pterodactylWS.sendCommand(id, "version");
-    let type = "UNKNOWN";
-    let version = "UNKNOWN";
-    if (versionCommandResult.success) {
-      if (versionCommandResult.result.includes("This server is running")) {
-        const getType = versionCommandResult.result.match(new RegExp(`running (.*?) version`, 's'));
-        if (getType && getType[1]) type = getType[1];
-        const getVersion = versionCommandResult.result.match(new RegExp(`version (.*?)-`, 's'));
-        if (getVersion && getVersion[1]) version = getVersion[1];
+    const lastTypeAndVersion = await prisma.server.findFirst({
+      where: {
+        id
+      },
+      select: {
+        type: true,
+        version: true
+      }
+    });
+
+    if (!lastTypeAndVersion) {
+      await prisma.server.delete({
+        where: {
+          guildId,
+          id
+        }
+      })
+      continue;
+    }
+
+    let type = lastTypeAndVersion.type;
+    let version = lastTypeAndVersion.version;
+    if (isOnline) {
+      const versionCommandResult = await pterodactylWS.sendCommand(id, "version");
+      if (versionCommandResult.success) {
+        if (versionCommandResult.result.includes("This server is running")) {
+          const getType = versionCommandResult.result.match(new RegExp(`running (.*?) version`, 's'));
+          if (getType && getType[1]) type = getType[1];
+          const getVersion = versionCommandResult.result.match(new RegExp(`version (.*?)-`, 's'));
+          if (getVersion && getVersion[1]) version = getVersion[1];
+        } else {
+          type = "UNKNOWN";
+          version = "UNKNOWN";
+        }
+      } else {
+        type = "UNKNOWN";
+        version = "UNKNOWN";
       }
     }
 
@@ -274,6 +312,7 @@ server.readAndUpdate = async function (guildId: string) {
       description: serverDetails.data.attributes.description,
       type,
       version,
+      status: serverDetails.data.attributes.status,
       specs: {
         memory: serverDetails.data.attributes.limits.memory,
         disk: serverDetails.data.attributes.limits.disk,
@@ -296,13 +335,15 @@ server.readAndUpdate = async function (guildId: string) {
       data: {
         information: updatedServerInfo,
         version,
-        type
+        type,
+        isOnline
       }
-    })
+    });
     serversArray.push({
         information: updatedServerInfo,
         version,
-        type
+        type,
+        isOnline
       });
   };
 

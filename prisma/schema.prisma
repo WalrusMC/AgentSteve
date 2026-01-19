@@ -43,6 +43,7 @@ model Server {
   information Json
   version String
   type String
+  isOnline Boolean @default(false)
   consoleHistory ConsoleLine[]
 
   guild Guild @relation(fields: [guildId], references: [id], onDelete: Cascade)

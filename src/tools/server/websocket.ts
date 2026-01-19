@@ -10,7 +10,7 @@ const log = createLogger("websocket");
 const PANEL_URL = "https://panel.wepwawet.net";
 const API_KEY = process.env.WEPWAWET_TOKEN;
 
-type SendCommandTR = ToolResult<string, { result: string, code: "NO_CONNECTION" | "TIMED_OUT" | "EXECUTION"}>;
+type SendCommandTR = ToolResult<string, { result: string, code: "NO_CONNECTION" | "TIMED_OUT" | "EXECUTION" | "OFFLINE"}>;
 
 type PterodactylWS = {
   sockets: Map<string, { socket: WebSocket, lastActive: Date}>,
@@ -162,6 +162,7 @@ export const pterodactylWS: PterodactylWS = {
           }
 
           cmd.resolve(consoleMessages, success);
+          this.pendingCommands.delete(cmdKey);
         }
       },
       onClose: async (id: string) => {
@@ -185,14 +186,24 @@ export const pterodactylWS: PterodactylWS = {
       onError: (id: string, err: Error) => {
         console.error(`[${id}] WS error`, err);
       }, // Not used for anything rn
-      onStatusChange: (id: string, status: string) => {
-      } // TODO: add status to server information
+      onStatusChange: async (id: string, status: string) => {
+        // TODO: Update server status on change- only problem is that server status is stored in information a JSON string and not just on prisma model. Might need to change that.
+      }
     });
 
     this.sockets.set(serverId, { socket: ws, lastActive: new Date() });
   },
 
   sendCommand: async function(serverId, command) {
+    const isOnline = await prisma.server.findFirst({
+      where: {
+        id: serverId
+      },
+      select: {
+        isOnline: true
+      }
+    });
+    if (!isOnline?.isOnline) return { name: "server.sendCommand", success: false, error: { result: "Server is offline", code: "OFFLINE" }}
     const entry = this.sockets.get(serverId);
     if (!entry) return { name: "server.sendCommand", success: false, error: { result: "No web socket connection", code: "NO_CONNECTION" } };
     const ws = entry.socket;
