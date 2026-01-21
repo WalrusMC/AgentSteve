@@ -89,7 +89,7 @@ export async function moderate(info: AgentInfo, toolHistory: ToolResult<any, any
 
   // Servers
   const servers = await server.readAndUpdate(guildId)
-  const serversInformation = servers.map(obj => obj.information);
+  const serversInformation = servers.map(obj => obj.data);
   
   log.debug("Moderate started for message", message.id);
 

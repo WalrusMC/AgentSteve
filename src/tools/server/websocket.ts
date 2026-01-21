@@ -55,14 +55,19 @@ async function connectToServer(serverId: string, handlers: Handlers) {
 
   ws.on("message", (data: string) => {
     const parsedData = JSON.parse(data.toString());
-    if (parsedData.event === "console output") {
-      for (const line of parsedData.args) {
-        handlers.onMessage(serverId, line.trim());
-      }
-    }
-    if ((parsedData.event === "token expiring") || (parsedData.event === "jwt error")) {
-      ws.close(1000);
-      handlers.onClose(serverId);
+    //if (parsedData.event !== "stats") log.debug(parsedData.event); // Log websocket events (not stats)
+    switch (parsedData.event) {
+      case "console output":
+        for (const line of parsedData.args) {
+          handlers.onMessage(serverId, line.trim());
+        }
+        break;
+      case "token expiring":
+      case "jwt error":
+        ws.close(1000);
+        handlers.onClose(serverId);
+      case "status":
+        handlers.onStatusChange(serverId, parsedData.args?.join("").trim());
     }
   });
 
@@ -91,7 +96,7 @@ export const pterodactylWS: PterodactylWS = {
 
     const ws = await connectToServer(serverId, {
       onMessage: async (id: string, msg: string) => {
-        log.debug(JSON.stringify([msg], null, 2));
+        //log.debug(JSON.stringify([msg], null, 2)); // Log messages
         if (!((new RegExp("STEVE:.*:COMMAND")).test(msg))) {
           // Save consoleLine
           await prisma.consoleLine.create({
@@ -183,11 +188,19 @@ export const pterodactylWS: PterodactylWS = {
         console.warn(`[${id}] disconnected, reconnecting...`);
         setTimeout(() => this.connectServer(id), 3000);
       },
-      onError: (id: string, err: Error) => {
+      onError: (id: string, err: Error) => { // Not used for anything rn
         console.error(`[${id}] WS error`, err);
-      }, // Not used for anything rn
+      },
       onStatusChange: async (id: string, status: string) => {
-        // TODO: Update server status on change- only problem is that server status is stored in information a JSON string and not just on prisma model. Might need to change that.
+        await prisma.server.update({
+          where: {
+            id
+          },
+          data: {
+            isOnline: status === "running"
+          }
+        });
+        log.debug(`Server status changed for ${id}. Status: ${status}`);
       }
     });
 

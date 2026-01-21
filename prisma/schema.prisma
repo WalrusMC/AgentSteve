@@ -40,10 +40,10 @@ model Plugin {
 
 model Server {
   id String @id
-  information Json
-  version String
-  type String
+
+  data Json
   isOnline Boolean @default(false)
+  type String
   consoleHistory ConsoleLine[]
 
   guild Guild @relation(fields: [guildId], references: [id], onDelete: Cascade)

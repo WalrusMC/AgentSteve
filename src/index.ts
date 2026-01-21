@@ -108,6 +108,8 @@ client.on("messageCreate", async (message) => {
 
   pterodactylWS.connect(servers.map(obj => obj.id));
 
+  return;
+
   const info: AgentInfo = {
     guildId: message.guildId,
     message,
