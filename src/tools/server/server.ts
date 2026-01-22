@@ -4,6 +4,7 @@ import { createLogger } from "../../utils/logger.js";
 import { prisma } from "../../../lib/prisma.js";
 import { pterodactylWS } from "./websocket.js";
 import { file, ServerFiles } from "./files.js";
+import type { ToolResult } from "../../types.js";
 
 const log = createLogger("Server Tool");
 
@@ -56,13 +57,13 @@ export interface ServerTool {
   check(guildId: string, serverId: string): Promise<boolean>;
   readAndUpdate(
     guildId: string,
-  ): Promise<Array<{ data: ServerData; isOnline: boolean; id: string }>>;
+  ): Promise<Array<{ data: ServerData; status: string; id: string }>>;
+  power(serverId: string, signal: "start" | "stop" | "restart" | "kill"): Promise<ToolResult<string, { reason: string, code: number }>>
   file: ServerFiles
 }
 
 export const server = { file } as ServerTool;
 
-/** MISC **/
 // Read accessible servers from ./db/${guildId}/servers.json
 const readServers = async (guildId: string) => {
   return await prisma.server.findMany({
@@ -72,10 +73,7 @@ const readServers = async (guildId: string) => {
   })
 };
 
-/**
- * Checks if Steve has access to a server. If Steve does not have access, tries to grant Steve access. 
- * Returns a string of one of: "NO_ACCESS" | "NO_SERVER" | "INVALID_KEY" | "500" | "UNKNOWN" | "ALREADY_ACCESSIBLE" | "NO_FILE" | "ACCESS_GRANTED" | "INTERNAL_SERVER_ERROR" | "INCORRECT_FILE"
- */
+// Checks if Steve has access to a server. If Steve does not have access, tries to grant Steve access. 
 server.addNew = async function (guildId: string, serverId: string) {
   const servers = await readServers(guildId);
   const serverIds = servers.map(obj => obj.id);
@@ -146,7 +144,14 @@ server.addNew = async function (guildId: string, serverId: string) {
   if (!((String(accessText.data)).trim() === String(guildId))) return "INCORRECT_FILE";
 
   // Status and isOnline
-  const status = serverDetails.data.attributes?.status ? serverDetails.data.attributes.status : "The server status couldn't be found. It is likely that the server is stopped.";
+  const status = (await prisma.server.findFirst({
+    where: {
+      id: serverId
+    },
+    select: {
+      status: true
+    }
+  }))?.status;
   const isOnline = status === "running"
 
   // Get server version info
@@ -179,7 +184,7 @@ server.addNew = async function (guildId: string, serverId: string) {
         description: serverDetails.data.attributes.description,
         type: isOnline ? type : "Type unknown: server is not running",
         version: isOnline ? version : "Version unknown: server not running",
-        status: status,
+        status,
         specs: {
           memory: serverDetails.data.attributes.limits.memory,
           disk: serverDetails.data.attributes.limits.disk,
@@ -194,7 +199,6 @@ server.addNew = async function (guildId: string, serverId: string) {
       },
       guildId,
       id: serverId,
-      isOnline,
       type
     }
   });
@@ -242,18 +246,20 @@ server.readAndUpdate = async function (guildId: string) {
       continue;
     }
 
-    // isOnline
-    const isOnline = serverDetails.data.attributes.status === "running"
-
     // Get last known information
-    const lastServerData = (await prisma.server.findFirst({
+    const lastServer = (await prisma.server.findFirst({
       where: {
         id
       },
       select: {
-        data: true
+        data: true,
+        status: true
       }
-    }))?.data as ServerData;
+    })) as { status: string, data: ServerData };
+
+    const lastServerData = lastServer?.data;
+    const status = lastServer?.status;
+    const isOnline = status === "running";
 
     let type = lastServerData.type;
     let version = lastServerData.version;
@@ -282,7 +288,7 @@ server.readAndUpdate = async function (guildId: string) {
       description: serverDetails.data.attributes.description,
       type,
       version,
-      status: serverDetails.data.attributes.status,
+      status,
       specs: {
         memory: serverDetails.data.attributes.limits.memory,
         disk: serverDetails.data.attributes.limits.disk,
@@ -304,15 +310,39 @@ server.readAndUpdate = async function (guildId: string) {
       },
       data: {
         data: updatedServerData,
-        isOnline
       }
     });
     serversArray.push({
       id,
       data: updatedServerData,
-      isOnline
+      status
     });
   };
 
   return serversArray;
+}
+
+server.power = async function (serverId, signal) {
+  const name = "server.power";
+  try {
+    await api.post(`/servers/${serverId}/power`, {
+      signal: signal
+    });
+  } catch (err: any) {
+    const status = err?.response?.status;
+    switch (status) {
+      case 400:
+        return { name, success: false, error: { reason: err?.response?.detail, code: 400 } };
+      case 403:
+        return { name, success: false, error: { reason: "You do not have permission to do this on the remote server.", code: 403 } };
+      case 500:
+        return { name, success: false, error: { reason: "An internal error occured. Do not call this tool again.", code: 500 } };
+      default:
+        return { name, success: false, error: { reason: "An unknown error has occured. Do not call this tool again.", code: 500 } };
+    }
+  }
+
+  let result = signal === "kill" ? `The server was forcably stopped (${signal})` : `The server is ${signal}ing`; // Kill, restarting, and starting
+  if (signal === "stop") result = "The server is stopping"; // Stopping
+  return { name, success: true, result };
 }

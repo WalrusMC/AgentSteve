@@ -197,7 +197,7 @@ export const pterodactylWS: PterodactylWS = {
             id
           },
           data: {
-            isOnline: status === "running"
+            status
           }
         });
         log.debug(`Server status changed for ${id}. Status: ${status}`);
@@ -213,10 +213,10 @@ export const pterodactylWS: PterodactylWS = {
         id: serverId
       },
       select: {
-        isOnline: true
+        status: true
       }
     });
-    if (!isOnline?.isOnline) return { name: "server.sendCommand", success: false, error: { result: "Server is offline", code: "OFFLINE" }}
+    if (isOnline?.status !== "running") return { name: "server.sendCommand", success: false, error: { result: "Server is not running", code: "OFFLINE" }}
     const entry = this.sockets.get(serverId);
     if (!entry) return { name: "server.sendCommand", success: false, error: { result: "No web socket connection", code: "NO_CONNECTION" } };
     const ws = entry.socket;

@@ -62,7 +62,7 @@ BEHAVIOR RULES
  * Sends the user message and context to the selected model and executes any tool calls.
  * Falls back to Discord response on errors.
  */
-export async function moderate(info: AgentInfo, toolHistory: ToolResult<any, any>[] = [], devOverride?: string | false): Promise<ResponderResponse> {
+export async function moderate(info: AgentInfo, toolHistory: ToolResult<any, any>[] = []): Promise<ResponderResponse> {
   const { message } = info;
   const { pastChats } = info;
   const { guildId } = info;
@@ -115,10 +115,10 @@ export async function moderate(info: AgentInfo, toolHistory: ToolResult<any, any
   }, null, 2);
 
   // Dev Input
-  const devInput = !devOverride ? JSON.stringify({
+  const devInput = JSON.stringify({
     instructions: developerPrompt,
     //information: {} // TODO: Information and default plugins and stuff idk
-  }, null, 2) : devOverride;
+  }, null, 2);
 
   // Assistant Input
   const assistantInput = JSON.stringify({
@@ -322,6 +322,29 @@ export async function moderate(info: AgentInfo, toolHistory: ToolResult<any, any
         required: ["ids"],
       },
       strict: true
+    },
+    {
+      type: "function",
+      name: "serverPower",
+      description: "Perform a power operation to a remote Minecraft server.",
+      parameters: {
+        type: "object",
+        additionalProperties: false,
+        properties: {
+          signal: {
+            type: "string",
+            description: "The power operation to perform.",
+            enum: [ "start", "stop", "restart", "kill" ]
+          },
+          id: {
+            type: "string",
+            description: "The ID of the remote Minecraft server.",
+            enum: servers.map(obj => obj.id)
+          }
+        },
+        required: ["signal", "id"],
+      },
+      strict: true
     }
   ];
 
@@ -373,10 +396,10 @@ export async function moderate(info: AgentInfo, toolHistory: ToolResult<any, any
       if (toolResult.success) {
         // TO DO: Improve the toolResult system (toolResult.result)
         toolHistory.push({ ...toolResult, name: toolCall.name});
-        return await moderate(info, toolHistory, devInput);
+        return await moderate(info, toolHistory);
       } else {
         toolHistory.push({ ...toolResult, name: toolCall.name});
-        return await moderate(info, toolHistory, devInput);
+        return await moderate(info, toolHistory);
       }
     case "clarify":
       return {
@@ -394,10 +417,10 @@ export async function moderate(info: AgentInfo, toolHistory: ToolResult<any, any
             success: false,
             error: `The requested document/documents (${args.ids}) was/were too big (${toolResult.result.size}). Documents should be a maximum of ~15,000 characters in total. Here are the individual sizes of each document you requested: ${toolResult.result}`
           });
-          return await moderate(info, toolHistory, devInput);
+          return await moderate(info, toolHistory);
         } else {
           toolHistory.push({ name: toolCall.name, success: true, result: toolResult.result.documents});
-          return await moderate(info, toolHistory, devInput);
+          return await moderate(info, toolHistory);
         }
       }
       switch (toolResult.error.reason) {
@@ -414,14 +437,14 @@ export async function moderate(info: AgentInfo, toolHistory: ToolResult<any, any
             success: false,
             error: `The requested document/documents (${args.ids}) could not be accessed (missing permission, or broken link). Do not try to access that/those document/documents again.`
           });
-          return await moderate(info, toolHistory, devInput);
+          return await moderate(info, toolHistory);
         case "UNKNOWN":
           toolHistory.push({
             name: "readDoc",
             success: false,
             error: `Failed to read the requested document/documents (${args.ids}) due to a Google API/auth error. Do not try this tool again.`
           });
-          return await moderate(info, toolHistory, devInput);
+          return await moderate(info, toolHistory);
         default:
           log.error("gdoc.read() returned invalid data.");
           return {
@@ -430,6 +453,11 @@ export async function moderate(info: AgentInfo, toolHistory: ToolResult<any, any
             responder: "moderate"
           };
         }
+    case "serverPower": 
+        toolResult = await server.power(args.id, args.signal);
+        if (!toolResult.success) toolHistory.push({...toolResult, error: toolResult.error.reason });
+        toolHistory.push(toolResult);
+        return await moderate(info, toolHistory);
     default:
       log.error("GPT did not call a valid tool.");
       return {
