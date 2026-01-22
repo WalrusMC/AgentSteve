@@ -97,7 +97,7 @@ file.deleteMany = async function (guildId: string, serverId: string, files: stri
     const status = err?.response?.status;
     switch (status) {
       case 404:
-        return { name, success: false, error: { reason: "The target file does not exist.", code: 404 } };
+        return { name, success: false, error: { reason: `The target file ${files} does not exist.`, code: 404 } };
       case 403:
         return { name, success: false, error: { reason: "You do not have permission: file.delete.", code: 403 } };
       case 500:
@@ -221,11 +221,11 @@ file.upload = async function (guildId: string, serverId: string, sourceFile: str
     const status = err?.response?.status;
     switch (status) {
       case 404:
-        return { name, success: false, error: { reason: "The target directory does not exist or an internal error occured.", code: 404 } };
+        return { name, success: false, error: { reason: `The target directory (${targetPath}) does not exist or an internal error occured.`, code: 404 } };
       case 403:
         return { name, success: false, error: { reason: "You do not have permission: file.upload.", code: 403 } };
       case 500:
-        return { name, success: false, error: { reason: "The target directory does not exist or an internal error occured.", code: 500 } }
+        return { name, success: false, error: { reason: `The target directory (${targetPath}) does not exist or an internal error occured.`, code: 500 } }
       default:
         return { name, success: false, error: { reason: "An unknown error has occured.", code: 500 } };
     }
