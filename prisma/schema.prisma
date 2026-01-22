@@ -40,8 +40,9 @@ model Plugin {
 
 model Server {
   id String @id
-  information Json
-  version String
+
+  data Json
+  status String @default("stopped")
   type String
   consoleHistory ConsoleLine[]
 

@@ -3,7 +3,8 @@ import axios from "axios";
 import { createLogger } from "../../utils/logger.js";
 import { prisma } from "../../../lib/prisma.js";
 import { pterodactylWS } from "./websocket.js";
-import { version } from "node:os";
+import { file, ServerFiles } from "./files.js";
+import type { ToolResult } from "../../types.js";
 
 const log = createLogger("Server Tool");
 
@@ -19,6 +20,26 @@ const api = axios.create({
   },
 });
 
+export type ServerData = {
+  id: string,
+  name: string,
+  description: string,
+  type: string,
+  version: string,
+  status: string,
+  specs: {
+    memory: string,
+    disk: string,
+    cpu: string
+  },
+  ip: string,
+  ports: {
+    port: number,
+    notes: string,
+    is_primary: boolean
+  }[]
+};
+
 export type AddNewServerResult =
   | "NO_ACCESS"
   | "NO_SERVER"
@@ -31,56 +52,18 @@ export type AddNewServerResult =
   | "INTERNAL_SERVER_ERROR"
   | "INCORRECT_FILE";
 
-export type ServerToolResponse<T> =
-  | { success: true; result: T; code: number }
-  | { success: false; result: string; code: number };
-
-export type ReadFilesResult =
-  | { success: false; result: string; code: number }
-  | {
-      success: boolean;
-      result: Array<{ success: boolean; path: string; contents: unknown; code: number }>;
-    };
-
 export interface ServerTool {
   addNew(guildId: string, serverId: string): Promise<AddNewServerResult>;
   check(guildId: string, serverId: string): Promise<boolean>;
   readAndUpdate(
     guildId: string,
-  ): Promise<Array<{ information: string; version: string; type: string }>>;
-  deleteFiles(
-    guildId: string,
-    serverId: string,
-    files: string[] | string,
-  ): Promise<ServerToolResponse<string>>;
-  readFiles(
-    guildId: string,
-    serverId: string,
-    files: string[] | string,
-  ): Promise<ReadFilesResult>;
-  readFile(serverId: string, file: string): Promise<ServerToolResponse<unknown>>;
-  writeFile(
-    guildId: string,
-    serverId: string,
-    file: string,
-    content: unknown,
-  ): Promise<ServerToolResponse<string>>;
-  uploadFile(
-    guildId: string,
-    serverId: string,
-    sourceFile: string,
-    targetPath: string,
-  ): Promise<ServerToolResponse<string>>;
-  downloadFile(
-    guildId: string,
-    serverId: string,
-    file: string,
-  ): Promise<ServerToolResponse<string>>;
+  ): Promise<Array<{ data: ServerData; status: string; id: string }>>;
+  power(serverId: string, signal: "start" | "stop" | "restart" | "kill"): Promise<ToolResult<string, { reason: string, code: number }>>
+  file: ServerFiles
 }
 
-export const server = {} as ServerTool;
+export const server = { file } as ServerTool;
 
-/** MISC **/
 // Read accessible servers from ./db/${guildId}/servers.json
 const readServers = async (guildId: string) => {
   return await prisma.server.findMany({
@@ -90,10 +73,7 @@ const readServers = async (guildId: string) => {
   })
 };
 
-/**
- * Checks if Steve has access to a server. If Steve does not have access, tries to grant Steve access. 
- * Returns a string of one of: "NO_ACCESS" | "NO_SERVER" | "INVALID_KEY" | "500" | "UNKNOWN" | "ALREADY_ACCESSIBLE" | "NO_FILE" | "ACCESS_GRANTED" | "INTERNAL_SERVER_ERROR" | "INCORRECT_FILE"
- */
+// Checks if Steve has access to a server. If Steve does not have access, tries to grant Steve access. 
 server.addNew = async function (guildId: string, serverId: string) {
   const servers = await readServers(guildId);
   const serverIds = servers.map(obj => obj.id);
@@ -120,7 +100,7 @@ server.addNew = async function (guildId: string, serverId: string) {
         log.error(err);
         return "INVALID_KEY";
       case 500:
-        log.error("We have a problem folks. The initial request to Wepwawet is giving off an error.");
+        log.error(`Wepwawet rejected the request (/servers/${serverId}/) with status code 500.`);
         return "500";
       default:
         log.error(err);
@@ -147,7 +127,7 @@ server.addNew = async function (guildId: string, serverId: string) {
     if (status === 404) return "NO_FILE";
     if (status === 403) return "NO_ACCESS";
     if (status === 500) return "500";
-    log.error(err);
+    log.error(`An error occurred while trying to GET the file contents from the remote Pterodactyl server (${serverId}). Here is the error: ${err}`);
     if (status === 401) return "INVALID_KEY";
     log.error(`An unkown error has occurred while trying to read a file for guild ${guildId} on server ${serverId}`);
     return "UNKNOWN";
@@ -159,12 +139,26 @@ server.addNew = async function (guildId: string, serverId: string) {
     log.error(`There was an error reading the agentsteve.txt file or it was blank for guild ${guildId} on server ${serverId}.`);
     return "INCORRECT_FILE";
   }
-  if ((String(accessText.data)).trim() === String(guildId)) {
 
-    // Get server version info
+  // Check if file code is correct
+  if (!((String(accessText.data)).trim() === String(guildId))) return "INCORRECT_FILE";
+
+  // Status and isOnline
+  const status = (await prisma.server.findFirst({
+    where: {
+      id: serverId
+    },
+    select: {
+      status: true
+    }
+  }))?.status;
+  const isOnline = status === "running"
+
+  // Get server version info
+  let type = "UNKNOWN";
+  let version = "UNKNOWN";
+  if (isOnline) {
     const versionCommandResult = await pterodactylWS.sendCommand(serverId, "version");
-    let type = "UNKNOWN";
-    let version = "UNKNOWN";
     if (versionCommandResult.success) {
       if (versionCommandResult.result.includes("This server is running")) {
         const getType = versionCommandResult.result.match(new RegExp(`running (.*?) version`, 's'));
@@ -179,47 +173,45 @@ server.addNew = async function (guildId: string, serverId: string) {
       type = "UNKNOWN";
       version = "UNKNOWN";
     }
-
-    // Add server to servers from servers.json
-    await prisma.server.create({
-      data: {
-        information: JSON.stringify({
-          id: serverId,
-          name: serverName,
-          description: serverDetails.data.attributes.description,
-          type,
-          version,
-          specs: {
-            memory: serverDetails.data.attributes.limits.memory,
-            disk: serverDetails.data.attributes.limits.disk,
-            cpu: serverDetails.data.attributes.limits.cpu
-          },
-          ip: serverDetails.data.attributes.relationships.allocations.data[0].ip,
-          ports: serverDetails.data.attributes.relationships.allocations.data.map((data: any) => ({
-            port: data.attributes.port,
-            notes: data.attributes.notes,
-            is_primary: data.attributes.is_default
-          })),
-        }, null, 2),
-        guildId,
-        id: serverId,
-        version,
-        type
-      }
-    })
-
-    // Delete access file from remote server
-    const data = await server.deleteFiles(guildId, serverId, "agentsteve.txt");
-
-    if (data.success || data.code === 403) {
-      return "ACCESS_GRANTED";
-    }
-
-    log.error(`The agentsteve.txt file could not be deleted. ${JSON.stringify(data, null, 2)}`);
-    return "INTERNAL_SERVER_ERROR";
   }
 
-  return "INCORRECT_FILE";
+  // Add server to servers from servers.json
+  await prisma.server.create({
+    data: {
+      data: {
+        id: serverId,
+        name: serverName,
+        description: serverDetails.data.attributes.description,
+        type: isOnline ? type : "Type unknown: server is not running",
+        version: isOnline ? version : "Version unknown: server not running",
+        status,
+        specs: {
+          memory: serverDetails.data.attributes.limits.memory,
+          disk: serverDetails.data.attributes.limits.disk,
+          cpu: serverDetails.data.attributes.limits.cpu
+        },
+        ip: serverDetails.data.attributes.relationships.allocations.data[0].ip,
+        ports: serverDetails.data.attributes.relationships.allocations.data.map((data: any) => ({
+          port: data.attributes.port,
+          notes: data.attributes.notes,
+          is_primary: data.attributes.is_default
+        })),
+      },
+      guildId,
+      id: serverId,
+      type
+    }
+  });
+
+  // Delete access file from remote server
+  const data = await server.file.deleteMany(guildId, serverId, "agentsteve.txt");
+
+  if (data.success || (!data.success && data.error.code === 403)) {
+    return "ACCESS_GRANTED";
+  }
+
+  log.error(`The agentsteve.txt file could not be deleted. ${JSON.stringify(data, null, 2)}`);
+  return "INTERNAL_SERVER_ERROR";
 };
 
 // Checks if a serverId matches an accessible server
@@ -254,26 +246,49 @@ server.readAndUpdate = async function (guildId: string) {
       continue;
     }
 
-    // Get server version info
-    const versionCommandResult = await pterodactylWS.sendCommand(id, "version");
-    let type = "UNKNOWN";
-    let version = "UNKNOWN";
-    if (versionCommandResult.success) {
-      if (versionCommandResult.result.includes("This server is running")) {
-        const getType = versionCommandResult.result.match(new RegExp(`running (.*?) version`, 's'));
-        if (getType && getType[1]) type = getType[1];
-        const getVersion = versionCommandResult.result.match(new RegExp(`version (.*?)-`, 's'));
-        if (getVersion && getVersion[1]) version = getVersion[1];
+    // Get last known information
+    const lastServer = (await prisma.server.findFirst({
+      where: {
+        id
+      },
+      select: {
+        data: true,
+        status: true
+      }
+    })) as { status: string, data: ServerData };
+
+    const lastServerData = lastServer?.data;
+    const status = lastServer?.status;
+    const isOnline = status === "running";
+
+    let type = lastServerData.type;
+    let version = lastServerData.version;
+    if (isOnline) {
+      const versionCommandResult = await pterodactylWS.sendCommand(id, "version");
+      if (versionCommandResult.success) {
+        if (versionCommandResult.result.includes("This server is running")) {
+          const getType = versionCommandResult.result.match(new RegExp(`running (.*?) version`, 's'));
+          if (getType && getType[1]) type = getType[1];
+          const getVersion = versionCommandResult.result.match(new RegExp(`version (.*?)-`, 's'));
+          if (getVersion && getVersion[1]) version = getVersion[1];
+        } else {
+          type = "UNKNOWN";
+          version = "UNKNOWN";
+        }
+      } else {
+        type = "UNKNOWN";
+        version = "UNKNOWN";
       }
     }
 
     // Create new info JSON object
-    const updatedServerInfo = JSON.stringify({
+    const updatedServerData: ServerData = {
       id,
       name: serverDetails?.data?.attributes?.name,
       description: serverDetails.data.attributes.description,
       type,
       version,
+      status,
       specs: {
         memory: serverDetails.data.attributes.limits.memory,
         disk: serverDetails.data.attributes.limits.disk,
@@ -285,7 +300,7 @@ server.readAndUpdate = async function (guildId: string) {
         notes: data.attributes.notes,
         is_primary: data.attributes.is_default
       })),
-    }, null, 2);
+    }
 
     // Update server
     await prisma.server.update({
@@ -294,251 +309,40 @@ server.readAndUpdate = async function (guildId: string) {
         id
       },
       data: {
-        information: updatedServerInfo,
-        version,
-        type
+        data: updatedServerData,
       }
-    })
+    });
     serversArray.push({
-        information: updatedServerInfo,
-        version,
-        type
-      });
+      id,
+      data: updatedServerData,
+      status
+    });
   };
 
   return serversArray;
 }
 
-
-/**  FILE INTERACTION **/
-// Deletes an array of file paths.
-server.deleteFiles = async function (guildId: string, serverId: string, files: string[] | string) {
-  if (!Array.isArray(files)) files = [files];
-
-  if (!(await server.check(guildId, serverId))) {
-    return { success: false, result: "The target server does not exist or you do not have access to it.", code: 401 };
-  }
-
+server.power = async function (serverId, signal) {
+  const name = "server.power";
   try {
-    await api.post(`/servers/${serverId}/files/delete`, {
-      root: "/",
-      files: files,
+    await api.post(`/servers/${serverId}/power`, {
+      signal: signal
     });
   } catch (err: any) {
     const status = err?.response?.status;
     switch (status) {
-      case 404:
-        return { success: false, result: "The target file does not exist.", code: 404 };
+      case 400:
+        return { name, success: false, error: { reason: err?.response?.detail, code: 400 } };
       case 403:
-        return { success: false, result: "You do not have permission: file.delete.", code: 403 };
+        return { name, success: false, error: { reason: "You do not have permission to do this on the remote server.", code: 403 } };
       case 500:
-        return { success: false, result: "The target file does not exist or an internal error occured.", code: 500 }
+        return { name, success: false, error: { reason: "An internal error occured. Do not call this tool again.", code: 500 } };
       default:
-        return { success: false, result: "An unknown error has occured.", code: 500 };
+        return { name, success: false, error: { reason: "An unknown error has occured. Do not call this tool again.", code: 500 } };
     }
   }
 
-  return { success: true, result: "The target file/files was/were successfully deleted.", code: 204 };
-};
-
-/**
- * Takes in an array of file paths and returns:
- * {
- *   success: boolean,
- *   result: [
- *     {
- *       success: boolean,
- *       path: string
- *       contents: string
- *       code: integer
- *     }
- *   ]
- * }
- */
-server.readFiles = async function (guildId: string, serverId: string, files: string[] | string) {
-  if (!Array.isArray(files)) files = [files];
-
-  if (!(await server.check(guildId, serverId))) {
-    return { success: false, result: "The target server does not exist or you do not have access to it.", code: 401 };
-  }
-
-  const data: {
-    success: boolean;
-    result: Array<{ success: boolean; path: string; contents: unknown; code: number }>;
-  } = {
-    success: true,
-    result: []
-  };
-
-  for (const file of files) {
-    const response = await this.readFile(serverId, file);
-    data.result.push({
-      success: response.success,
-      path: file,
-      contents: response.result,
-      code: response.code,
-    });
-    if (!response.success) data.success = false;
-  }
-
-  return data;
-
-}
-
-/**
- * Takes in a file path and returns:
- * {
- *   success: boolean,
- *   path: string
- *   contents: string
- *   code: integer
- * }
- */
-server.readFile = async function (serverId: string, file: string) {
-  let response;
-  try {
-    response = await api.post(`/servers/${serverId}/files/contents`, {
-      params: {
-        file: file
-      }
-    });
-  } catch (err: any) {
-    const status = err?.response?.status;
-    switch (status) {
-      case 404:
-        return { success: false, result: "The target file does not exist.", code: 404 };
-      case 403:
-        return { success: false, result: "You do not have permission: file.read.", code: 403 };
-      case 500:
-        return { success: false, result: "The target file does not exist or an internal error occured.", code: 500}
-      default:
-        return { success: false, result: "An unknown error has occured.", code: 500 };
-    }
-  }
-
-  return { success: true, result: response.data, code: 200 };
-}
-
-// Takes in a file path and content and writes a file to the specified path
-server.writeFile = async function (guildId: string, serverId: string, file: string, content: unknown) {
-
-  if (!(await server.check(guildId, serverId))) {
-    return { success: false, result: "The target server does not exist or you do not have access to it.", code: 401 };
-  }
-
-  try {
-    const response = await api.post(`/servers/${serverId}/files/write`, content, {
-      params: {
-        file: file
-      }
-    });
-  } catch (err: any) {
-    const status = err?.response?.status;
-    switch (status) {
-      case 404:
-        return { success: false, result: "The target server or directory does not exist or an internal error occured.", code: 404 };
-      case 403:
-        return { success: false, result: "You do not have permission: file.write.", code: 403 };
-      case 500:
-        return { success: false, result: "The target directory does not exist or an internal error occured.", code: 500 }
-      default:
-        return { success: false, result: "An unknown error has occured.", code: 500 };
-    }
-  }
-
-  return { success: true, result: `The specified file, ${file}, has been written to.`, code: 204 };
-}
-
-// Uploads sourceFile to targetPath
-// TODO: Uncompleted- needs to be completed
-server.uploadFile = async function (guildId: string, serverId: string, sourceFile: string, targetPath: string) {
-  if (!(await server.check(guildId, serverId))) {
-    return { success: false, result: "The target server does not exist or you do not have access to it.", code: 401 };
-  }
-
-  // Get signed URL
-  const uploadUrlResponse = await axios.get(
-    `/servers/${serverId}/files/upload`,
-    {
-      params: {
-        directory: targetPath
-      }
-    }
-  );
-
-  const signedUrl = uploadUrlResponse.data.attributes.url;
-
-  // Upload file to signed URL
-  const formData: any = new (FormData as any)();
-  //formData.append('files', await fs.createReadStream(`./src/tools/downloads/${guildId}/${sourceFile}`)); // TODO: Idk why this is commented or what it is needs to be completed
-  formData.append('directory', targetPath);
-
-  try {
-    const headers = typeof formData.getHeaders === "function" ? formData.getHeaders() : {};
-    await axios.post(signedUrl, formData, { headers });
-  } catch (err: any) {
-    const status = err?.response?.status;
-    switch (status) {
-      case 404:
-        return { success: false, result: "The target directory does not exist or an internal error occured.", code: 404 };
-      case 403:
-        return { success: false, result: "You do not have permission: file.upload.", code: 403 };
-      case 500:
-        return { success: false, result: "The target directory does not exist or an internal error occured.", code: 500 }
-      default:
-        return { success: false, result: "An unknown error has occured.", code: 500 };
-    }
-  }
-
-  return { success: true, result: `The specified source file, ${sourceFile}, has been uploaded to ${targetPath}.`, code: 204 };
-
-}
-
-// Downloads file
-server.downloadFile = async function (guildId: string, serverId: string, file: string) {
-  if (!(await server.check(guildId, serverId))) {
-    return { success: false, result: "The target server does not exist or you do not have access to it.", code: 401 };
-  }
-
-  try {
-    await api.get(`/servers/${serverId}/files/download`, {
-      params: {
-        file: file
-      },
-      responseType: "stream"
-    });
-  } catch (err: any) {
-    const status = err?.response?.status;
-    switch (status) {
-      case 404:
-        return { success: false, result: "The target file does not exist.", code: 404 };
-      case 403:
-        return { success: false, result: "You do not have permission: file.download.", code: 403 };
-      case 500:
-        return { success: false, result: "The target file does not exist or an internal error occured.", code: 500 }
-      default:
-        return { success: false, result: "An unknown error has occured.", code: 500 };
-    }
-  }
-
-  function removePath(str: string) {
-    const lastIndex = str.lastIndexOf("/");
-
-    // Check if there is path
-    if (lastIndex === -1) {
-      return str; // Return original string if path is not present
-    } else {
-      // Extract the substring starting from the /'s index + 1
-      return str.substring(lastIndex + 1);
-    }
-  }
-
-  try {
-    //response.data.pipe(fs.createWriteStream(`./src/tools/downloads/${guildId}/${removePath(file)}`)); // TODO: Idk why this is commented or what it is needs to be completed
-  } catch {
-    return { success: false, result: `An internal error occured while trying to download the target file, ${file}.`, code: 500 }
-  }
-
-  return { success: true, result: `The target file, ${file}, was successfully downloaded.`, code: 204 };
-
+  let result = signal === "kill" ? `The server was forcably stopped (${signal})` : `The server is ${signal}ing`; // Kill, restarting, and starting
+  if (signal === "stop") result = "The server is stopping"; // Stopping
+  return { name, success: true, result };
 }

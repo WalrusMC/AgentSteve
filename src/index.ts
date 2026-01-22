@@ -9,8 +9,8 @@ import { gdoc } from "./tools/google.js";
 import { prisma } from "../lib/prisma.js";
 import fs from "fs/promises";
 import { pterodactylWS } from "./tools/server/websocket.js";
-
-import type { AgentInfo, ResponderResponse, ToolResult, ReadDocFail, ReadDocSuccess } from "./types.js";
+import type { AgentInfo, ResponderResponse, ToolResult } from "./types.js";
+import type { ReadDocFail, ReadDocSuccess } from "./tools/google.js";
 
 // Logger scoped to the Discord bot entrypoint
 const log = createLogger("index");

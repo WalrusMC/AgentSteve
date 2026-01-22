@@ -10,7 +10,7 @@ const log = createLogger("websocket");
 const PANEL_URL = "https://panel.wepwawet.net";
 const API_KEY = process.env.WEPWAWET_TOKEN;
 
-type SendCommandTR = ToolResult<string, { result: string, code: "NO_CONNECTION" | "TIMED_OUT" | "EXECUTION"}>;
+type SendCommandTR = ToolResult<string, { result: string, code: "NO_CONNECTION" | "TIMED_OUT" | "EXECUTION" | "OFFLINE"}>;
 
 type PterodactylWS = {
   sockets: Map<string, { socket: WebSocket, lastActive: Date}>,
@@ -55,14 +55,19 @@ async function connectToServer(serverId: string, handlers: Handlers) {
 
   ws.on("message", (data: string) => {
     const parsedData = JSON.parse(data.toString());
-    if (parsedData.event === "console output") {
-      for (const line of parsedData.args) {
-        handlers.onMessage(serverId, line.trim());
-      }
-    }
-    if ((parsedData.event === "token expiring") || (parsedData.event === "jwt error")) {
-      ws.close(1000);
-      handlers.onClose(serverId);
+    //if (parsedData.event !== "stats") log.debug(parsedData.event); // Log websocket events (not stats)
+    switch (parsedData.event) {
+      case "console output":
+        for (const line of parsedData.args) {
+          handlers.onMessage(serverId, line.trim());
+        }
+        break;
+      case "token expiring":
+      case "jwt error":
+        ws.close(1000);
+        handlers.onClose(serverId);
+      case "status":
+        handlers.onStatusChange(serverId, parsedData.args?.join("").trim());
     }
   });
 
@@ -91,7 +96,7 @@ export const pterodactylWS: PterodactylWS = {
 
     const ws = await connectToServer(serverId, {
       onMessage: async (id: string, msg: string) => {
-        log.debug(JSON.stringify([msg], null, 2));
+        //log.debug(JSON.stringify([msg], null, 2)); // Log messages
         if (!((new RegExp("STEVE:.*:COMMAND")).test(msg))) {
           // Save consoleLine
           await prisma.consoleLine.create({
@@ -162,6 +167,7 @@ export const pterodactylWS: PterodactylWS = {
           }
 
           cmd.resolve(consoleMessages, success);
+          this.pendingCommands.delete(cmdKey);
         }
       },
       onClose: async (id: string) => {
@@ -182,17 +188,35 @@ export const pterodactylWS: PterodactylWS = {
         console.warn(`[${id}] disconnected, reconnecting...`);
         setTimeout(() => this.connectServer(id), 3000);
       },
-      onError: (id: string, err: Error) => {
+      onError: (id: string, err: Error) => { // Not used for anything rn
         console.error(`[${id}] WS error`, err);
-      }, // Not used for anything rn
-      onStatusChange: (id: string, status: string) => {
-      } // TODO: add status to server information
+      },
+      onStatusChange: async (id: string, status: string) => {
+        await prisma.server.update({
+          where: {
+            id
+          },
+          data: {
+            status
+          }
+        });
+        log.debug(`Server status changed for ${id}. Status: ${status}`);
+      }
     });
 
     this.sockets.set(serverId, { socket: ws, lastActive: new Date() });
   },
 
   sendCommand: async function(serverId, command) {
+    const isOnline = await prisma.server.findFirst({
+      where: {
+        id: serverId
+      },
+      select: {
+        status: true
+      }
+    });
+    if (isOnline?.status !== "running") return { name: "server.sendCommand", success: false, error: { result: "Server is not running", code: "OFFLINE" }}
     const entry = this.sockets.get(serverId);
     if (!entry) return { name: "server.sendCommand", success: false, error: { result: "No web socket connection", code: "NO_CONNECTION" } };
     const ws = entry.socket;
