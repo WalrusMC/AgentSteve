@@ -4,8 +4,9 @@ import type { AgentInfo, ToolResult } from "../types.js";
 import { prisma } from "../../lib/prisma.js";
 import { server } from "../tools/server/server.js";
 import { createLogger } from "../utils/logger.js";
+import { gdoc } from "../tools/google.js";
 
-const log = createLogger();
+const log = createLogger("workflow");
 const client = new OpenAI();
 
 const systemPrompt = `You are Steve, an advanced multi-model AI assistant for Minecraft server owners.
@@ -26,8 +27,8 @@ Once your workflow is created, it will be automatically executed in full, and a 
 
 Rules:
 - Always answer the user’s currentUserMessage, not assumptions or past intents.
-- If unsure about what the user is asking, send a clarification message.
-- If what the user is requesting is impossible for you to do, send a response explaining why the task is unable to be fulfilled.
+- If unsure about what the user is asking, choose clarification and send a clarification message.
+- If what the user is requesting is impossible for you to do, choose impossibleUserRequest and send a response explaining why the task is unable to be fulfilled.
 `;
 
 export async function workflow(info: AgentInfo, toolHistory: ToolResult<any, any>[]) {
@@ -94,7 +95,7 @@ export async function workflow(info: AgentInfo, toolHistory: ToolResult<any, any
 
     toolHistory: {
       noteToSelf: "These are tools I just called to answer the current user request and their results.",
-      content: toolHistory //To include or not to include, that is the question (How will we give results of previous workflows without overloading the model)
+      content: toolHistory // To include or not to include, that is the question (How will we give results of previous workflows without overloading the model)
     },
     resources: {
       noteToSelf: "These are the resources in their current state that I have access to.",
@@ -117,84 +118,66 @@ export async function workflow(info: AgentInfo, toolHistory: ToolResult<any, any
 
   const tasks = [
     {
-      "description": "Creates a new plugin.",
       "type": "object",
+      "description": "Perform a power operation on a remote Minecraft server.",
       "properties": {
-        "type": { "const": "createNewPlugin" },
-        "pluginName": {
-          "type": "string",
-          "description": "The name of the plugin. MUST be a valid Java class name."
-        },
-        "pluginDescription": {
-          "type": "string",
-          "description": "A description of the plugin to be created."
+        "name": { "type": "string", "const": "serverPower" },
+        "signal": { "type": "string", "enum": [ "start", "stop", "restart", "kill" ] },
+        "serverId": { "type": "string", "enum": servers.map(obj => obj.id) }
+      },
+      "required": [ "name", "signal", "serverId" ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "description": "Create a new plugin.",
+      "properties": {
+        "name": { "type": "string", "const": "createNewPlugin" },
+        "pluginName": { "type": "string", "description": "The plugin name. MUST be a valid Java class name." },
+        "description": {
+          "description": "A description of the plugin to be created.",
+          "type": "string"
         },
         "userRequested": {
-          "type": "boolean",
-          "description": "Did the user directly request this plugin?"
+          "description": "Was the creation of this plugin directly requested by the user (choose true), or did you decide to create this plugin? (choose false)",
+          "type": "boolean"
         }
       },
-      "required": ["type", "pluginName", "pluginDescription", "userRequested"],
+      "required": [ "name", "pluginName", "description", "userRequested" ],
       "additionalProperties": false
     },
     {
-      "description": "Edits a pre-existing plugin.",
       "type": "object",
+      "description": "Edit an existing plugin.",
       "properties": {
-        "type": { "const": "editPlugin" },
-        "pluginName": {
-          "type": "string",
-          "description": "The name of the plugin."
-          // TODO: Add enum for plugin names
-        },
-        "pluginDescription": {
-          "type": "string",
-          "description": "A description of what needs to be changed on the plugin."
+        "name": { "type": "string", "const": "editPlugin" },
+        "pluginName": { "type": "string", "enum": plugins.map(obj => obj.name) },
+        "description": {
+          "description": "A description of how the plugin should be edited.",
+          "type": "string"
         },
         "userRequested": {
-          "type": "boolean",
-          "description": "Did the user directly request that this plugin be edited or did you decide to edit this plugin?"
+          "description": "Did the user directly request that this plugin be edited (choose true), or did you decide to edit this plugin? (choose false)",
+          "type": "boolean"
         }
       },
-      "required": ["type", "pluginName", "pluginDescription", "userRequested"],
+      "required": [ "name", "pluginName", "description", "userRequested" ],
       "additionalProperties": false
     },
     {
-      "description": "Reads remote Google Documents.",
       "type": "object",
+      "description": "Read a remote Google document.",
       "properties": {
-        "type": { "const": "readDoc" },
-        "documentIds": {
-          "type": "array",
-          "items": {
-            "type": "string",
-            // TODO: Add enum for doc IDs maybe
-          }
-        }
+        "name": { "type": "string", "const": "readDoc" },
+        "docId": { "type": "string", "enum": gdoc.extractIds(JSON.stringify(userInput + assistantInput)) }
       },
-      "required": ["type", "documentIds"],
+      "required": [ "name", "docId" ],
       "additionalProperties": false
     },
-    {
-      "description": "Performs a power operation on a remote Minecraft server.",
-      "type": "object",
-      "properties": {
-        "type": { "const": "serverPower" },
-        "serverId": {
-          "type": "string",
-          // TODO: Add enum for server IDs
-        },
-        "signal": {
-          "type": "string",
-          "enum": [ "start", "stop", "restart", "kill" ]
-        }
-      },
-      "required": [ "type", "serverId", "signal" ],
-      "additionalProperties": false
-    }
-  ];
+  ]
 
   // Send request to OpenAI
+  log.response(`OPENAI INPUT (WORKFLOW)`, `|TOOLS|\n${JSON.stringify(tasks, null, 2)}\n|SYSTEM|\n${systemPrompt}\n|DEVELOPER|\n${devInput}\n|USER|\n${userInput}\n|ASSISTANT|\n${assistantInput}`);
   const response = await client.responses.create({
     "model": models.general.low.fast,
     "input": [
@@ -218,59 +201,38 @@ export async function workflow(info: AgentInfo, toolHistory: ToolResult<any, any
         "strict": true,
         "schema": {
           "type": "object",
-          "oneOf": [
-            {
-              "description": "A workflow of tasks to be executed",
-              "properties": {
-                "type": { "const": "workflow" },
-                "tasks": {
-                  "type": "array",
-                  "items": {
-                    "type": "object",
-                    "properties": {
-                      "id": { "type": "integer" },
-                      "description": {
-                        "type": "string",
-                        "description": "A brief description of why this task is necessary."
-                      },
-                      "task": {
-                        "description": "The specific tool to execute.",
-                        "oneOf": tasks
-                      }
-                    },
-                    "required": ["id", "description", "task"],
-                    "additionalProperties": false
+          "properties": {
+            "workflow": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "type": "integer"
+                  },
+                  "reason": {
+                    "type": "string",
+                    "description": "A brief description of why you chose this task"
+                  },
+                  "task": {
+                    "anyOf": tasks
                   }
-                }
-              },
-              "required": ["type", "tasks"],
-              "additionalProperties": false
+                },
+                "required": [ "id", "reason", "task" ],
+                "additionalProperties": false
+              }
             },
-            {
-              "description": "A textual response sent when the user request is impossible to fulfill",
-              "properties": {
-                "type": { "const": "impossibleUserRequest" },
-                "message": {
-                  "type": "string",
-                  "description": "Explanation of why the request cannot be fulfilled."
-                }
-              },
-              "required": ["type", "message"],
-              "additionalProperties": false
+            "impossibleUserRequest": {
+              "anyOf": [ { "type": "string" }, { "type": "null" } ],
+              "description": "A response to be sent to the user if their request is impossible. Leave this as null unless you are unable to create a workflow for the user request.",
             },
-            {
-              "description": "A clarification message sent when more information is required",
-              "properties": {
-                "type": { "const": "clarify" },
-                "message": {
-                  "type": "string",
-                  "description": "Clarification request to send to the user."
-                }
-              },
-              "required": ["type", "message"],
-              "additionalProperties": false
-            },
-          ],
+            "clarification": {
+              "anyOf": [ { "type": "string" }, { "type": "null" } ],
+              "description": "A clarification message to be sent to the user if more information is needed to create a workflow. Leave this as null unless you need to clarify something with the user."
+            }
+          },
+          "required": [ "workflow", "impossibleUserRequest", "clarification" ],
+          "additionalProperties": false
         }
       }
     }
