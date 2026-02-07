@@ -1,7 +1,6 @@
 import OpenAI from "openai"
 import { createLogger } from "../utils/logger.js";
 import { plugin } from "../tools/plugin.js";
-import { models } from "../models.js";
 import type { AgentInfo, ToolResult } from "../types.js";
 import type { PluginDB } from "../tools/plugin.js";
 
@@ -9,26 +8,193 @@ const client = new OpenAI;
 const log = createLogger("coder");
 
 const systemPrompt = `You are Steve, an AI assistant who lives on Discord and assists Minecraft server owners. 
-You are specifically the coding specialist model, part of Steve, an agentic, multi-model AI assistant for Minecraft server owners.
+You are specifically the coding specialist agent, part of Steve, a multi-agent AI assistant for Minecraft server owners.
 
 Rules:
 ALWAYS call the tool defined in the developer prompt. 
 DO NOT use code fences.
 ONLY return a tool call.`;
 
-/**
- * Builds a plugin JAR, then returns:
- * {
- *  success: boolean
- *  file: string
- * }
- * 
- * job = createNewPlugin, editPlugin, fixCrash
- */
+type Coder = {
+  createPlugin(AgentInfo: AgentInfo, model: string, pluginName: string): Promise<ToolResult<string, { reason: string, code: "ALREADY_EXISTS" | "IMPOSSIBLE"}>>;
+}
 
-type CoderJob = "createNewPlugin" | "editPlugin" | "fixCrash";
+export const coder = {} as Coder;
 
-export async function coder(
+coder.createPlugin = async function(AgentInfo, model, pluginName) {
+  const { message } = AgentInfo;
+  const { pastChats } = AgentInfo;
+
+  const devPrompt = `Your job is to create a new Paper 1.20.1 Minecraft plugin called ${pluginName} from the user prompt by calling 
+  the **createPlugin** tool. You may use your assisant message to understand the user intent and your past chats to 
+  understand the context of the current user message.`;
+
+  // User input and past chats
+  const attachmentNames = message?.attachments?.size 
+  ? Array.from(message.attachments.values()).map(a => a.name ?? "").filter(Boolean).join(",")
+  : "";
+  const currentUserMessage = {
+    time: message.createdAt.toISOString(),
+    author: {
+      id: message.author.id,
+      username: message.author.username,
+      isAdministrator: true
+    },
+    content: message.content,
+    attachments: attachmentNames,
+  };
+  const userInput = JSON.stringify({
+    pastChats: pastChats,
+    currentUserMessage: currentUserMessage
+  }, null, 2);
+
+  // Send request to OpenAI
+  log.response(`OPENAI INPUT (coder.createPlugin)`, `|TOOLS|\nN/A JSON Schema\n|SYSTEM|\n${systemPrompt}\n|DEVELOPER|\n${devInput}\n|USER|\n${userInput}\n|ASSISTANT|\n${assistantInput}`);
+  const response = await client.responses.create({
+    model: model,
+    input: [
+      {
+        role: "system",
+        content: systemPrompt
+      },
+      {
+        role: "developer",
+        content: devPrompt
+      },
+      {
+        role: "user",
+        content: userInput
+      }
+    ],
+    text: {
+      format: {
+        type: "json_schema",
+        name: "createPlugin",
+        strict: true,
+        schema: {
+          type: "object",
+          properties: {
+            pluginDescription: {
+              type: "string",
+              description: "A 1-5 sentence description of the plugin.",
+            },
+            pluginJava: {
+              type: "object",
+              description: `The java code for the plugin.
+              Rules:
+              - Only output Java 17 compatible Paper 1.20.1 code.
+              - Name the class exactly ${pluginName}.
+              - Use package: com.walrusmc.${pluginName.toLowerCase()}
+              - Include correct imports.
+              `,
+              properties: {
+                [`${pluginName}`]: {
+                  type: "string",
+                  description: `The base code to go inside ${pluginName}.java. The correct package is com.walrusmc.${pluginName.toLowerCase()}`
+                },
+                listeners: {
+                  type: "array",
+                  description: "An array of files to include inside /listeners/*",
+                  items: {
+                    type: "object",
+                    properties: {
+                      name: {
+                        type: "string",
+                        description: "The name of the file. Example: 'PlayerJoinListener.java'. MUST include '.java'."
+                      },
+                      contents: {
+                        type: "string",
+                        description: "The code to include inside your specific /listeners/* file."
+                      }
+                    }
+                  }
+                },
+                commands: {
+                  type: "array",
+                  description: "An array of files to include inside /commands/*",
+                  items: {
+                    type: "object",
+                    properties: {
+                      name: {
+                        type: "string",
+                        description: "The name of the file. Example: 'ExampleCommand.java'. MUST include '.java'."
+                      },
+                      contents: {
+                        type: "string",
+                        description: "The code to include inside your specific /commands/* file."
+                      }
+                    }
+                  }
+                },
+                config: {
+                  type: "array",
+                  description: "An array of files to include inside /config/*",
+                  items: {
+                    type: "object",
+                    properties: {
+                      name: {
+                        type: "string",
+                        description: "The name of the file. Example: 'ConfigManager.java'. MUST include '.java'."
+                      },
+                      contents: {
+                        type: "string",
+                        description: "The code to include inside your specific /config/* file."
+                      }
+                    }
+                  }
+                },
+                services: {
+                  type: "array",
+                  description: "An array of files to include inside /services/*",
+                  items: {
+                    type: "object",
+                    properties: {
+                      name: {
+                        type: "string",
+                        description: "The name of the file. Example: '.java'. MUST include '.java'."
+                      },
+                      contents: {
+                        type: "string",
+                        description: "The code to include inside your specific //* file."
+                      }
+                    }
+                  }
+                },
+              }
+            },
+            pluginYML: {
+              type: "string",
+              description: `The code for plugin.yml. Must include main: com.walrusmc.${pluginName.toLowerCase()}.${pluginName}`,
+            },
+            configYML: {
+              type: ["string"],
+              description: "Optional (empty string if none). The code for config.yml.",
+            },
+            dependencies: { 
+              type: ["array"], 
+              description: `Optional (empty array if none). Additional Maven dependency XML blocks to insert inside pom.xml <dependencies>
+              (as raw XML). DO NOT include paper-api (1.20.1) or adventure-api (these are already included), but include any other dependencies your code requires. Example format:
+              <dependency>
+                <groupId>com.github.placeholderapi</groupId>
+                <artifactId>placeholderapi</artifactId>
+                <version>2.11.5</version>
+                <scope>provided</scope>
+              </dependency>`, 
+              items: { type: "string", description: "A single Maven <dependency>...</dependency> XML block as raw text."},
+            },
+          },
+          required: ["pluginJava", "pluginYML", "pluginDescription", "configYML", "dependencies"],
+          additionalProperties: false
+        }
+      }
+    }
+  });
+
+  
+
+}
+
+/*export async function coder(
   job: CoderJob,
   pluginName: string,
   assistantInput: string,
@@ -304,4 +470,5 @@ export async function coder(
         error: "A critical error has occurred. Do not call this tool again."
       };
   }
-}
+}*/
+
