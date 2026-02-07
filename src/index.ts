@@ -184,7 +184,6 @@ client.on("messageCreate", async (message) => {
     }
 
     // Documents
-    // TO DO: Improve the toolResult system (toolResult.result)
     const readDocResult: ToolResult<ReadDocSuccess, ReadDocFail> = message.content.includes("https://docs.google.com/document/d/") ? await gdoc.read(message.guildId, message.content, message) : { name: "readDoc", success: false, error: { reason: "NO_DOCS", code: 204 } };
     if (!readDocResult.success) {
       switch (readDocResult.error.reason) {
