@@ -79,85 +79,30 @@ coder.createPlugin = async function(AgentInfo, model, pluginName) {
               description: "A 1-5 sentence description of the plugin.",
             },
             pluginJava: {
-              type: "object",
+              type: "array",
               description: `The java code for the plugin.
               Rules:
               - Only output Java 17 compatible Paper 1.20.1 code.
               - Name the class exactly ${pluginName}.
               - Use package: com.walrusmc.${pluginName.toLowerCase()}
               - Include correct imports.
+              - The root directory ('/') MUST include a file named ${pluginName}.java
               `,
-              properties: {
-                [`${pluginName}`]: {
-                  type: "string",
-                  description: `The base code to go inside ${pluginName}.java. The correct package is com.walrusmc.${pluginName.toLowerCase()}`
-                },
-                listeners: {
-                  type: "array",
-                  description: "An array of files to include inside /listeners/*",
-                  items: {
-                    type: "object",
-                    properties: {
-                      name: {
-                        type: "string",
-                        description: "The name of the file. Example: 'PlayerJoinListener.java'. MUST include '.java'."
-                      },
-                      contents: {
-                        type: "string",
-                        description: "The code to include inside your specific /listeners/* file."
-                      }
-                    }
-                  }
-                },
-                commands: {
-                  type: "array",
-                  description: "An array of files to include inside /commands/*",
-                  items: {
-                    type: "object",
-                    properties: {
-                      name: {
-                        type: "string",
-                        description: "The name of the file. Example: 'ExampleCommand.java'. MUST include '.java'."
-                      },
-                      contents: {
-                        type: "string",
-                        description: "The code to include inside your specific /commands/* file."
-                      }
-                    }
-                  }
-                },
-                config: {
-                  type: "array",
-                  description: "An array of files to include inside /config/*",
-                  items: {
-                    type: "object",
-                    properties: {
-                      name: {
-                        type: "string",
-                        description: "The name of the file. Example: 'ConfigManager.java'. MUST include '.java'."
-                      },
-                      contents: {
-                        type: "string",
-                        description: "The code to include inside your specific /config/* file."
-                      }
-                    }
-                  }
-                },
-                services: {
-                  type: "array",
-                  description: "An array of files to include inside /services/*",
-                  items: {
-                    type: "object",
-                    properties: {
-                      name: {
-                        type: "string",
-                        description: "The name of the file. Example: '.java'. MUST include '.java'."
-                      },
-                      contents: {
-                        type: "string",
-                        description: "The code to include inside your specific //* file."
-                      }
-                    }
+              items: {
+                type: "object",
+                properties: {
+                  path: {
+                    type: "string",
+                    description: "Where your file should be stored.",
+                    enum: [ "/", "config/", "commands/", "storage/", "listeners/", "services/", "models/", "utils/", "hooks/" ]
+                  },
+                  name: {
+                    type: "string",
+                    description: "The name of your file. MUST include '.java' at the end."
+                  },
+                  contents: {
+                    type: "string",
+                    description: "The code to be included in your file."
                   }
                 },
               }
@@ -167,12 +112,12 @@ coder.createPlugin = async function(AgentInfo, model, pluginName) {
               description: `The code for plugin.yml. Must include main: com.walrusmc.${pluginName.toLowerCase()}.${pluginName}`,
             },
             configYML: {
-              type: ["string"],
-              description: "Optional (empty string if none). The code for config.yml.",
+              type: "string",
+              description: "The code for config.yml.",
             },
             dependencies: { 
-              type: ["array"], 
-              description: `Optional (empty array if none). Additional Maven dependency XML blocks to insert inside pom.xml <dependencies>
+              type: "array", 
+              description: `Any additional Maven dependency XML blocks to insert inside pom.xml <dependencies>
               (as raw XML). DO NOT include paper-api (1.20.1) or adventure-api (these are already included), but include any other dependencies your code requires. Example format:
               <dependency>
                 <groupId>com.github.placeholderapi</groupId>
