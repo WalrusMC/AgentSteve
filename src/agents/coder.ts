@@ -49,7 +49,7 @@ coder.createPlugin = async function(AgentInfo, model, pluginName) {
   }, null, 2);
 
   // Send request to OpenAI
-  log.response(`OPENAI INPUT (coder.createPlugin)`, `|TOOLS|\nN/A JSON Schema\n|SYSTEM|\n${systemPrompt}\n|DEVELOPER|\n${devInput}\n|USER|\n${userInput}\n|ASSISTANT|\n${assistantInput}`);
+  log.response(`OPENAI INPUT (coder.createPlugin)`, `|TOOLS|\nN/A JSON Schema\n|SYSTEM|\n${systemPrompt}\n|DEVELOPER|\n${devPrompt}\n|USER|\n${userInput}\n|ASSISTANT|\nForgot to log this or hasn't been implemented yet`);
   const response = await client.responses.create({
     model: model,
     input: [
@@ -74,11 +74,11 @@ coder.createPlugin = async function(AgentInfo, model, pluginName) {
         schema: {
           type: "object",
           properties: {
-            pluginDescription: {
+            description: {
               type: "string",
               description: "A 1-5 sentence description of the plugin.",
             },
-            pluginJava: {
+            java: {
               type: "array",
               description: `The java code for the plugin.
               Rules:
@@ -86,7 +86,7 @@ coder.createPlugin = async function(AgentInfo, model, pluginName) {
               - Name the class exactly ${pluginName}.
               - Use package: com.walrusmc.${pluginName.toLowerCase()}
               - Include correct imports.
-              - The root directory ('/') MUST include a file named ${pluginName}.java
+              - Always include a file named ${pluginName}.java in the root directory ('/')
               `,
               items: {
                 type: "object",
@@ -105,15 +105,27 @@ coder.createPlugin = async function(AgentInfo, model, pluginName) {
                     description: "The code to be included in your file."
                   }
                 },
+                required: [ "path", "name", "contents" ],
+                additionalProperties: false
               }
             },
-            pluginYML: {
-              type: "string",
-              description: `The code for plugin.yml. Must include main: com.walrusmc.${pluginName.toLowerCase()}.${pluginName}`,
-            },
-            configYML: {
-              type: "string",
-              description: "The code for config.yml.",
+            resources: {
+              type: "array",
+              description: "Any resource files to be included for the plugin. You MUST include the plugin.yml with `main: com.walrusmc.${pluginName.toLowerCase()}.${pluginName}`.",
+              items: {
+                type: "object",
+                properties: {
+                  name: {
+                    type: "string",
+                    enum: [ "plugin.yml", "config.yml", "messages.yml" ]
+                  },
+                  contents: {
+                    type: "string"
+                  }
+                },
+                required: [ "name", "contents" ],
+                additionalProperties: false
+              }
             },
             dependencies: { 
               type: "array", 
@@ -128,7 +140,7 @@ coder.createPlugin = async function(AgentInfo, model, pluginName) {
               items: { type: "string", description: "A single Maven <dependency>...</dependency> XML block as raw text."},
             },
           },
-          required: ["pluginJava", "pluginYML", "pluginDescription", "configYML", "dependencies"],
+          required: ["description", "java", "resources", "dependencies"],
           additionalProperties: false
         }
       }
