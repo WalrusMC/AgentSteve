@@ -263,6 +263,7 @@ server.readAndUpdate = async function (guildId: string) {
 
     let type = lastServerData.type;
     let version = lastServerData.version;
+    // If server is online, tries to update server version and type. Otherwise, uses last known version and type
     if (isOnline) {
       const versionCommandResult = await pterodactylWS.sendCommand(id, "version");
       if (versionCommandResult.success) {
