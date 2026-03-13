@@ -54,15 +54,7 @@ const createOAuthClient = () =>
 
 export const gdoc: Gdoc = {} as Gdoc;
 
-/** Extracts different document tabs out of a document and returns:
- * [
- *  {
- *    title: string,
- *    content: string,
- *    subTabs: array
- *  }
- * ]
-*/
+// Extracts different document tabs out of a document and returns an array of tab objects
 const getTabs = function(tabs: any[]) {
   const tabArray: DocTabs = [];
   (tabs || []).forEach((obj: any) => {
