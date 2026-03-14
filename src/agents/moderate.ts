@@ -1,6 +1,5 @@
 import OpenAI from "openai";
 import { sendMsgDiscord } from "../tools/sendMsgDiscord.js";
-import { coder } from "./coder.js"
 import { createLogger } from "../utils/logger.js";
 import { gdoc } from "../tools/google.js";
 import { models } from "../models.js";
@@ -390,7 +389,7 @@ export async function moderate(info: AgentInfo, toolHistory: ToolResult<any, any
         isClarification: false,
         responder: "moderate"
       };
-    case "editPlugin":
+    /*case "editPlugin":
     case "createNewPlugin":
       toolResult = await coder(toolCall.name, args.pluginName, JSON.stringify(args.assistantMessage, null, 2), args.complex ? models.coder.high.slow : models.coder.medium.slow, info);
       if (toolResult.success) {
@@ -400,7 +399,8 @@ export async function moderate(info: AgentInfo, toolHistory: ToolResult<any, any
       } else {
         toolHistory.push({ ...toolResult, name: toolCall.name});
         return await moderate(info, toolHistory);
-      }
+      }*/
+     // Being REVAMPED! {:)
     case "clarify":
       return {
         messages: await sendMsgDiscord(args.question, message),

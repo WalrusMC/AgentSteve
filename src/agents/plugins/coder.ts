@@ -1,33 +1,41 @@
 import OpenAI from "openai"
-import { createLogger } from "../utils/logger.js";
-import { plugin } from "../tools/plugin.js";
-import type { AgentInfo, ToolResult } from "../types.js";
-import type { PluginDB } from "../tools/plugin.js";
+import { createLogger } from "../../utils/logger.js";
+import { plugin } from "../../tools/plugin.js";
+import type { AgentInfo, ToolResult } from "../../types.js";
+import type { PluginDB } from "../../tools/plugin.js";
 
 const client = new OpenAI;
-const log = createLogger("coder");
+const log = createLogger("pluginCoder");
 
 const systemPrompt = `You are Steve, an AI assistant who lives on Discord and assists Minecraft server owners. 
-You are specifically the coding specialist agent, part of Steve, a multi-agent AI assistant for Minecraft server owners.
+You are specifically the plugin coding specialist agent, part of Steve, a multi-agent AI assistant for Minecraft server owners.
 
 Rules:
-ALWAYS call the tool defined in the developer prompt. 
 DO NOT use code fences.
 ONLY return a tool call.`;
 
-type Coder = {
-  createPlugin(AgentInfo: AgentInfo, model: string, pluginName: string): Promise<ToolResult<string, { reason: string, code: "ALREADY_EXISTS" | "IMPOSSIBLE"}>>;
+type PluginCoder = {
+  create(agentInfo: AgentInfo, model: string, pluginName: string, userRequested: 0 | 1 | 2 /*0: assistant requested, 1: user requested (simple), 2: user requested (complex)*/): Promise<ToolResult<string, { reason: string, code: "ALREADY_EXISTS" | "IMPOSSIBLE"}>>;
 }
 
-export const coder = {} as Coder;
+export const pluginCoder = {} as PluginCoder;
 
-coder.createPlugin = async function(AgentInfo, model, pluginName) {
-  const { message } = AgentInfo;
-  const { pastChats } = AgentInfo;
+pluginCoder.create = async function(agentInfo, model, pluginName, userRequested) {
+  const { message } = agentInfo;
+  const { pastChats } = agentInfo;
 
-  const devPrompt = `Your job is to create a new Paper 1.20.1 Minecraft plugin called ${pluginName} from the user prompt by calling 
-  the **createPlugin** tool. You may use your assisant message to understand the user intent and your past chats to 
-  understand the context of the current user message.`;
+ let devPrompt = "";
+
+ switch (userRequested) {
+  case 0:
+    devPrompt = `Your job is to create a new Paper 1.20.1 Minecraft plugin as defined in your assistant input called ${pluginName}.`
+  case 1:
+    devPrompt = `Your job is to create a new Paper 1.20.1 Minecraft plugin as defined by the user called ${pluginName}. 
+    You may use your assistant input for help understanding the user intent.`
+  case 2:
+    devPrompt = `Your job is to create the base for a new Paper 1.20.1 Minecraft plugin for the user as defined in your assistant input called ${pluginName}. 
+    You may use the user input to help understand the context of the plugin, but rely on your assistant input for exact information on what you should build.`
+ }
 
   // User input and past chats
   const attachmentNames = message?.attachments?.size 
@@ -43,13 +51,13 @@ coder.createPlugin = async function(AgentInfo, model, pluginName) {
     content: message.content,
     attachments: attachmentNames,
   };
-  const userInput = JSON.stringify({
+  const userInput = userRequested ? JSON.stringify({
     pastChats: pastChats,
     currentUserMessage: currentUserMessage
-  }, null, 2);
+  }, null, 2) : "";
 
   // Send request to OpenAI
-  log.response(`OPENAI INPUT (coder.createPlugin)`, `|TOOLS|\nN/A JSON Schema\n|SYSTEM|\n${systemPrompt}\n|DEVELOPER|\n${devPrompt}\n|USER|\n${userInput}\n|ASSISTANT|\nForgot to log this or hasn't been implemented yet`);
+  log.response(`OPENAI INPUT (pluginCoder.create)`, `|TOOLS|\nN/A JSON Schema\n|SYSTEM|\n${systemPrompt}\n|DEVELOPER|\n${devPrompt}\n|USER|\n${userInput}\n|ASSISTANT|\nForgot to log this or hasn't been implemented yet`);
   const response = await client.responses.create({
     model: model,
     input: [
@@ -129,18 +137,49 @@ coder.createPlugin = async function(AgentInfo, model, pluginName) {
             },
             dependencies: { 
               type: "array", 
-              description: `Any additional Maven dependency XML blocks to insert inside pom.xml <dependencies>
-              (as raw XML). DO NOT include paper-api (1.20.1) or adventure-api (these are already included), but include any other dependencies your code requires. Example format:
-              <dependency>
-                <groupId>com.github.placeholderapi</groupId>
-                <artifactId>placeholderapi</artifactId>
-                <version>2.11.5</version>
-                <scope>provided</scope>
-              </dependency>`, 
-              items: { type: "string", description: "A single Maven <dependency>...</dependency> XML block as raw text."},
+              description: `Any additional Maven dependencies to insert inside pom.xml <dependencies>. 
+              DO NOT include paper-api (1.20.1) or adventure-api (these are already included), but include any other dependencies your code requires.`, 
+              items: { 
+                type: "object", 
+                properties: {
+                  groupId: {
+                    type: "string"
+                  },
+                  artifactId: {
+                    type: "string"
+                  },
+                  version: {
+                    type: "string"
+                  },
+                  scope: {
+                    type: "string",
+                    enum: [ "provided", "compile", "runtime" ]
+                  }
+                },
+                required: [ "groupId", "artifactId", "version", "scope" ],
+                additionalProperties: false
+              },
             },
+            respositories: {
+              type: "array",
+              description: `Any additional Maven repositories to insert inside pom.xml <repositories>. 
+              DO NOT include papermc-repo or sonatype (these are already included), but include any other repositories your code requires.`,
+              items: {
+                type: "object",
+                properties: {
+                  id: {
+                    type: "string"
+                  },
+                  url: {
+                    type: "string"
+                  }
+                },
+                required: [ "id", "url" ],
+                additionalProperties: false
+              }
+            }
           },
-          required: ["description", "java", "resources", "dependencies"],
+          required: [ "description", "java", "resources", "dependencies", "repositories" ],
           additionalProperties: false
         }
       }
