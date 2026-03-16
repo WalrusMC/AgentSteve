@@ -104,16 +104,7 @@ client.on("messageCreate", async (message) => {
   if (!message.member?.permissions?.has(PermissionsBitField.Flags.Administrator)) return await message.reply(":warning: You don't have permission to talk to me right now. Only server administrators can talk to me.");
   if (currentlyRunning[`${message.guildId}`]) return await message.reply("Slow down there! I can only answer one question at a time.");
 
-  // #REMOVE sorry if I forget to remove this
-  const info: AgentInfo = {
-    guildId: message.guildId,
-    message,
-    pastChats: await getPastChats(message, 2100)
-  }
-  const result = await architect(info, "WalrusMCCombatLog", true);
-  if (result.success) console.log(result.result);
-
-  /*
+  
   const servers = await prisma.server.findMany({
     where: {
       guildId: message.guildId
@@ -264,7 +255,7 @@ client.on("messageCreate", async (message) => {
     log.debug("Cleared typing interval");
     if (typingInterval) clearInterval(typingInterval);
     currentlyRunning[`${message.guildId}`] = false;
-  }*/
+  }
 
   
 });
