@@ -33,6 +33,29 @@ const projectFileSchema = {
   required: ["path", "content"],
 } as const;
 
+const lineObjectSchema = {
+  type: "object",
+  additionalProperties: false,
+  properties: {
+    line: { type: "integer", minimum: 1 },
+    content: { type: "string" },
+  },
+  required: ["line", "content"],
+} as const;
+
+const lineFileSchema = {
+  type: "object",
+  additionalProperties: false,
+  properties: {
+    file: { type: "string" },
+    lines: {
+      type: "array",
+      items: lineObjectSchema,
+    },
+  },
+  required: ["file", "lines"],
+} as const;
+
 const buildJsonSchema = (name: string, schema: Record<string, unknown>) => ({
   type: "json_schema",
   name,
@@ -110,11 +133,14 @@ Rules:
     editPlugin: (pluginName: string) => `Update the existing in-memory Paper 1.20.1 plugin project for ${pluginName}.
 
 Rules:
-- Return the full updated project manifest, not a diff.
+- Return only the edit plan for the current task, not the full project manifest.
+- Use deletions and insertions for existing files.
+- Add new files only through the new file arrays when they are actually needed.
 - Preserve completed behavior unless the current task explicitly changes it.
 - Keep the main plugin class named ${pluginName}.
-- Keep Java file paths relative to src/main/java and resource paths relative to src/main/resources.
-- Merge new dependencies and repositories only when needed by the current task.`,
+- Existing file paths are provided as line-numbered file objects.
+- Keep new Java file paths relative to src/main/java and new resource file paths relative to src/main/resources.
+- Return the full dependency and repository arrays for the updated project state.`,
     fixError: (pluginName: string) => `Fix the build errors in the Paper 1.20.1 plugin project for ${pluginName}.
 
 Rules:
@@ -124,7 +150,7 @@ Rules:
 - Do not remove requested features unless the build error makes them impossible.`,
   },
   reviewer: {
-    developer: `Review the completed Paper 1.20.1 plugin project and summarize what it does for the database and final response.
+    developer: `Review the completed Paper 1.20.1 plugin project and summarize what it does.
 
 Rules:
 - Focus on user-facing behavior.
@@ -221,6 +247,91 @@ export const pluginSchemas = {
         },
       },
       required: ["description", "javaFiles", "resourceFiles", "dependencies", "repositories"],
+    }),
+  coderEdit: (currentProjectFilePaths: string[]) =>
+    buildJsonSchema("plugin_project_edit_plan", {
+      type: "object",
+      additionalProperties: false,
+      properties: {
+        description: {
+          type: "string",
+          description: "The updated overall project description after this task.",
+        },
+        deletions: {
+          type: "array",
+          description: "Sections of existing files to delete. Use an empty array when no deletions are needed.",
+          items: {
+            type: "object",
+            additionalProperties: false,
+            properties: {
+              file: {
+                type: "string",
+                enum: currentProjectFilePaths,
+              },
+              startLine: {
+                type: "integer",
+                minimum: 1,
+              },
+              endLine: {
+                type: "integer",
+                minimum: 1,
+              },
+            },
+            required: ["file", "startLine", "endLine"],
+          },
+        },
+        insertions: {
+          type: "array",
+          description: "Sections of code to insert into existing files. Use an empty array when no insertions are needed.",
+          items: {
+            type: "object",
+            additionalProperties: false,
+            properties: {
+              file: {
+                type: "string",
+                enum: currentProjectFilePaths,
+              },
+              startLine: {
+                type: "integer",
+                minimum: 0,
+              },
+              content: {
+                type: "string",
+              },
+            },
+            required: ["file", "startLine", "content"],
+          },
+        },
+        newJavaFiles: {
+          type: "array",
+          description: "Brand new Java files relative to src/main/java.",
+          items: projectFileSchema,
+        },
+        newResourceFiles: {
+          type: "array",
+          description: "Brand new resource files relative to src/main/resources.",
+          items: projectFileSchema,
+        },
+        dependencies: {
+          type: "array",
+          description: "The full dependency array after this task.",
+          items: dependencySchema,
+        },
+        repositories: {
+          type: "array",
+          description: "The full repository array after this task.",
+          items: repositorySchema,
+        },
+      },
+      required: [
+        "description",
+        "deletions",
+        "insertions",
+        "newJavaFiles",
+        "newResourceFiles",
+        "dependencies",
+        "repositories",
+      ],
     }),
   reviewer: buildJsonSchema("plugin_review_summary", {
     type: "object",

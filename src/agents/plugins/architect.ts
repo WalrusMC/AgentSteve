@@ -13,6 +13,8 @@ export async function architect(
   info: AgentInfo,
   request: PluginCreationRequest,
 ): Promise<PluginArchitectResult> {
+  // The architect only runs for medium plugins and produces an ordered task plan
+  // that the pipeline can hand off to coders one step at a time.
   const userInput = buildPluginUserInput(info);
   const assistantInput = buildPluginAssistantInput(request);
 
@@ -64,6 +66,7 @@ export async function architect(
       };
     }
 
+    // Keep execution deterministic even if the model returns tasks out of order.
     const tasks = [...parsed.tasks].sort((a, b) => a.id - b.id);
 
     return {

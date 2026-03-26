@@ -5,6 +5,7 @@ import { reviewer } from "../agents/plugins/reviewer.js";
 import { router } from "../agents/plugins/router.js";
 import type {
   PluginCreationRequest,
+  PluginEditPlan,
   PluginPipelineError,
   PluginPipelineResult,
   PluginProjectManifest,
@@ -18,7 +19,10 @@ import { plugin } from "../tools/plugin.js";
 const log = createLogger("pluginPipeline");
 const INITIAL_VERSION = "1.0.0";
 const MAX_BUILD_FIX_ATTEMPTS = 2;
+const JAVA_ROOT = "src/main/java/";
+const RESOURCE_ROOT = "src/main/resources/";
 
+// Normalize unexpected failures into one pipeline-level error shape.
 function internalError(message: string, details?: string): PluginPipelineError {
   return {
     code: "INTERNAL_ERROR",
@@ -27,6 +31,7 @@ function internalError(message: string, details?: string): PluginPipelineError {
   };
 }
 
+// The reviewer stores structured fields, but the DB currently keeps one summary string.
 function formatReviewSummary(review: PluginReview) {
   const sections = [review.summary.trim()];
 
@@ -45,10 +50,99 @@ function formatReviewSummary(review: PluginReview) {
   return sections.filter(Boolean).join("\n\n");
 }
 
+// If the reviewer fails after a successful build, preserve a usable summary anyway.
 function fallbackSummary(request: PluginCreationRequest, project: PluginProjectManifest) {
   const description = project.description.trim();
   if (description.length) return description;
   return request.assistantMessage.summary.trim();
+}
+
+function normalizeRelativePath(filePath: string) {
+  return filePath.replace(/\\/g, "/").replace(/^\/+/, "");
+}
+
+// Apply the edit coder's deletions first, then insertions, against one existing file.
+function applyTextChanges(
+  content: string,
+  fileKey: string,
+  plan: PluginEditPlan,
+) {
+  const lines = content.split("\n");
+
+  [...plan.deletions]
+    .filter(entry => entry.file === fileKey)
+    .sort((a, b) => b.startLine - a.startLine)
+    .forEach(({ startLine, endLine }) => {
+      const startIndex = Math.max(0, startLine - 1);
+      const deleteCount = Math.max(0, endLine - startLine + 1);
+      lines.splice(startIndex, deleteCount);
+    });
+
+  [...plan.insertions]
+    .filter(entry => entry.file === fileKey)
+    .sort((a, b) => a.startLine - b.startLine)
+    .forEach(({ startLine, content: insertionContent }) => {
+      const insertionIndex = Math.max(0, Math.min(lines.length, startLine));
+      lines.splice(insertionIndex, 0, ...insertionContent.split("\n"));
+    });
+
+  return lines.join("\n");
+}
+
+// Convert the edit coder's patch plan back into a full in-memory project manifest.
+function applyEditPlan(
+  project: PluginProjectManifest,
+  plan: PluginEditPlan,
+): PluginProjectManifest {
+  const javaFiles = project.javaFiles.map(file => ({
+    path: file.path,
+    content: applyTextChanges(file.content, `${JAVA_ROOT}${file.path}`, plan),
+  }));
+  const resourceFiles = project.resourceFiles.map(file => ({
+    path: file.path,
+    content: applyTextChanges(file.content, `${RESOURCE_ROOT}${file.path}`, plan),
+  }));
+
+  const existingPaths = new Set([
+    ...javaFiles.map(file => `${JAVA_ROOT}${file.path}`),
+    ...resourceFiles.map(file => `${RESOURCE_ROOT}${file.path}`),
+  ]);
+
+  const appendedJavaFiles = plan.newJavaFiles.map(file => {
+    const normalizedPath = normalizeRelativePath(file.path);
+    const fullPath = `${JAVA_ROOT}${normalizedPath}`;
+    if (existingPaths.has(fullPath)) {
+      throw new Error(`Edit plan attempted to add duplicate Java file ${normalizedPath}.`);
+    }
+
+    existingPaths.add(fullPath);
+    return {
+      path: normalizedPath,
+      content: file.content,
+    };
+  });
+
+  const appendedResourceFiles = plan.newResourceFiles.map(file => {
+    const normalizedPath = normalizeRelativePath(file.path);
+    const fullPath = `${RESOURCE_ROOT}${normalizedPath}`;
+    if (existingPaths.has(fullPath)) {
+      throw new Error(`Edit plan attempted to add duplicate resource file ${normalizedPath}.`);
+    }
+
+    existingPaths.add(fullPath);
+    return {
+      path: normalizedPath,
+      content: file.content,
+    };
+  });
+
+  return {
+    description: plan.description.trim() || project.description,
+    javaFiles: [...javaFiles, ...appendedJavaFiles],
+    resourceFiles: [...resourceFiles, ...appendedResourceFiles],
+    dependencies: plan.dependencies,
+    repositories: plan.repositories,
+  };
 }
 
 async function savePluginRecord(
@@ -57,6 +151,7 @@ async function savePluginRecord(
   file: `${string}.jar`,
   summary: string,
 ) {
+  // The create flow writes the final plugin record only after build + review succeed.
   const existingPlugin = await prisma.plugin.findFirst({
     where: {
       guildId: info.guildId,
@@ -78,7 +173,6 @@ async function savePluginRecord(
     return;
   }
 
-  // TO DO
 
   await prisma.plugin.create({
     data: {
@@ -96,6 +190,7 @@ async function runJarBuilderWorkflow(
   request: PluginCreationRequest,
   initialProject: PluginProjectManifest,
 ) {
+  // The builder loop allows one initial build plus bounded repair attempts.
   let workingProject = initialProject;
 
   for (let attempt = 0; attempt <= MAX_BUILD_FIX_ATTEMPTS; attempt += 1) {
@@ -141,6 +236,7 @@ async function runJarBuilderWorkflow(
       };
     }
 
+    // Feed the full project plus compiler output back into the repair coder.
     const fixedProject = await coder.fixBuildError(
       info,
       request,
@@ -175,6 +271,7 @@ async function buildProjectManifest(
   complexityTier: "simple" | "medium",
 ) {
   if (complexityTier === "simple") {
+    // Small plugins skip the architect and are generated in one coder pass.
     const simpleProject = await coder.createNew(info, request);
     if (simpleProject.success) {
       return {
@@ -191,6 +288,7 @@ async function buildProjectManifest(
     };
   }
 
+  // Medium plugins are decomposed into sequential tasks that mutate the same project.
   const architecture = await architect(info, request);
   if (!architecture.success) {
     if (architecture.error.code === "IMPOSSIBLE") {
@@ -212,6 +310,7 @@ async function buildProjectManifest(
   }
 
   const [firstTask, ...remainingTasks] = architecture.result;
+  // The first task creates the initial project skeleton and base feature set.
   const initialProject = await coder.createNew(info, request, {
     task: firstTask,
     remainingTasks,
@@ -230,6 +329,7 @@ async function buildProjectManifest(
 
   for (let index = 0; index < remainingTasks.length; index += 1) {
     const task = remainingTasks[index];
+    // Each later task returns a patch plan against the current project snapshot.
     const editResult = await coder.editExisting(info, request, {
       currentProject: workingProject,
       task,
@@ -245,7 +345,20 @@ async function buildProjectManifest(
       };
     }
 
-    workingProject = editResult.result;
+    try {
+      // The pipeline owns patch application so model output stays declarative.
+      workingProject = applyEditPlan(workingProject, editResult.result);
+    } catch (error) {
+      return {
+        name: "createNewPlugin",
+        success: false as const,
+        error: internalError(
+          "The edit plan could not be applied to the current project.",
+          error instanceof Error ? error.message : String(error),
+        ),
+      };
+    }
+
     completedTasks.push(task);
   }
 
@@ -262,6 +375,7 @@ export async function createNewPlugin(
 ): Promise<PluginPipelineResult> {
   log.info(`Starting plugin creation pipeline for ${request.pluginName}`);
 
+  // Reject duplicates before spending tokens on routing or coding.
   if (await plugin.exists(request.pluginName, info.guildId)) {
     return {
       name: "createNewPlugin",
@@ -273,6 +387,7 @@ export async function createNewPlugin(
     };
   }
 
+  // The complexity router chooses which creation workflow is allowed to run.
   const complexity = await router(info, request);
 
   if (complexity.tier === "large") {
@@ -289,6 +404,7 @@ export async function createNewPlugin(
     };
   }
 
+  // Build the project first, then compile it, then review/store the final result.
   const projectResult = await buildProjectManifest(info, request, complexity.tier);
   if (!projectResult.success) {
     return {
@@ -321,6 +437,7 @@ export async function createNewPlugin(
     buildResult.result.project,
     buildResult.result.artifact,
   );
+  // Reviewer failures should not discard a working plugin build.
   const summary = reviewResult.success
     ? formatReviewSummary(reviewResult.result)
     : fallbackSummary(request, buildResult.result.project);

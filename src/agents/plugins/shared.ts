@@ -7,6 +7,7 @@ export function buildPluginUserInput(info: AgentInfo) {
     ? message.attachments.map(att => att.name ?? "UNKNOWN_ATTACHMENT")
     : [];
 
+  // Every plugin specialist agent sees the same normalized Discord context.
   return JSON.stringify(
     {
       pastChats,
@@ -30,6 +31,8 @@ export function buildPluginAssistantInput(
   request: PluginCreationRequest,
   extra: Record<string, unknown> = {},
 ) {
+  // Agent-specific state is layered on top of the base plugin request so each
+  // model call keeps a stable request shape plus only the extra context it needs.
   return JSON.stringify(
     {
       pluginRequest: request,

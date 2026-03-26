@@ -21,6 +21,8 @@ export async function reviewer(
   project: PluginProjectManifest,
   artifact: BuiltPluginArtifact,
 ): Promise<PluginReviewerResult> {
+  // The reviewer runs only after a successful build and writes the human-facing
+  // summary that ends up in the plugin database record and final user response.
   const userInput = buildPluginUserInput(info);
   const assistantInput = buildPluginAssistantInput(request, {
     project,
