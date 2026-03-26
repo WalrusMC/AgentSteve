@@ -192,7 +192,6 @@ client.on("messageCreate", async (message) => {
     
     
     // Documents
-    // TO DO: Improve the toolResult system (toolResult.result)
     const readDocResult: ToolResult<ReadDocSuccess, ReadDocFail> = message.content.includes("https://docs.google.com/document/d/") ? await gdoc.read(message.guildId, message.content, message) : { name: "readDoc", success: false, error: { reason: "NO_DOCS", code: 204 } };
     if (!readDocResult.success) {
       switch (readDocResult.error.reason) {
@@ -213,7 +212,7 @@ client.on("messageCreate", async (message) => {
     if (!readDocResult.success && readDocResult?.error?.code !== 204 && readDocResult?.error?.code !== 404) toolHistory.push({ ...readDocResult, name: "readDoc" });
     if (readDocResult.success) toolHistory.push({ ...readDocResult, name: "readDoc" });
 
-    // Memory - TO DO: Create memory summaries and just memory
+    // Memory - TO DO: Create memory summaries and just memory lol
 
     // Forward to router, or skip the router if the last message was a clarification message.
     let responderResponse: ResponderResponse;
