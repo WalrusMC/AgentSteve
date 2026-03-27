@@ -2,7 +2,6 @@ import OpenAI from "openai";
 import { prisma } from "../../lib/prisma.js";
 import { models } from "../models.js";
 import { createNewPlugin } from "../pipelines/plugin.js";
-import { pluginToolSchemas } from "../prompts.js";
 import { gdoc } from "../tools/google.js";
 import { server } from "../tools/server/server.js";
 import { sendMsgDiscord } from "../tools/sendMsgDiscord.js";
@@ -12,7 +11,8 @@ import { createLogger } from "../utils/logger.js";
 const client = new OpenAI();
 const log = createLogger("moderate");
 
-const systemPrompt = `You are Steve, an advanced multi-model AI assistant for Minecraft server owners.
+const systemPrompt = `You are Steve, a multi-agent system built to assist Minecraft server owners.
+You are specifically the moderation and tool-orchestration agent, part of Steve, a multi-agent system.
 You live on Discord and help users with:
 - Writing new Minecraft Paper plugins
 - Code generation
@@ -31,6 +31,40 @@ Rules:
 - If a tool call is necessary to complete the task, do not answer directly. Call the tool.
 - If unsure about what the user is asking, ask for clarification via clarify(), not assumptions.
 `;
+
+const createNewPluginToolSchema = {
+  type: "object",
+  additionalProperties: false,
+  properties: {
+    pluginName: {
+      type: "string",
+      description: "The plugin name. It must also be a valid Java class name.",
+    },
+    assistantMessage: {
+      type: "object",
+      additionalProperties: false,
+      properties: {
+        intent: {
+          type: "string",
+          description: "One sentence describing the user's main intent.",
+        },
+        summary: {
+          type: "string",
+          description: "A short summary of the requested plugin behavior.",
+        },
+        requirements: {
+          type: "array",
+          description: "Concrete requirements, constraints, commands, or feature notes from the request.",
+          items: {
+            type: "string",
+          },
+        },
+      },
+      required: ["intent", "summary", "requirements"],
+    },
+  },
+  required: ["pluginName", "assistantMessage"],
+} as const;
 
 const developerPrompt = `
 Your job is to analyze the currentUserMessage, decide what needs to be done,
@@ -185,7 +219,7 @@ export async function moderate(
       type: "function",
       name: "createNewPlugin",
       description: "Creates a brand new Paper 1.20.1 Minecraft plugin JAR based on the user's request.",
-      parameters: pluginToolSchemas.createNewPlugin,
+      parameters: createNewPluginToolSchema,
       strict: true,
     },
     {

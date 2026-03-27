@@ -2,7 +2,7 @@ import OpenAI from "openai";
 import { models } from "../../models.js";
 import type { AgentInfo } from "../../types.js";
 import { createLogger } from "../../utils/logger.js";
-import { pluginPrompts, pluginSchemas } from "../../prompts.js";
+import { pluginPrompts } from "../../prompts.js";
 import { buildPluginAssistantInput, buildPluginUserInput } from "./shared.js";
 import type {
   PluginComplexityDecision,
@@ -12,6 +12,36 @@ import type {
 
 const client = new OpenAI();
 const log = createLogger("pluginComplexityRouter");
+const systemPrompt = `You are Steve, a multi-agent system built to assist Minecraft server owners.
+You are specifically the plugin complexity routing specialist agent, part of Steve, a multi-agent system.
+You classify Paper 1.20.1 plugin requests by implementation complexity.
+Return only valid JSON that matches the provided schema.
+Do not use markdown fences.
+Do not explain your reasoning outside the JSON response.`;
+const complexityRouterSchema = {
+  type: "json_schema",
+  name: "plugin_complexity_router",
+  strict: true,
+  schema: {
+    type: "object",
+    additionalProperties: false,
+    properties: {
+      score: {
+        type: "integer",
+        minimum: 1,
+        maximum: 10,
+      },
+      tier: {
+        type: "string",
+        enum: ["simple", "medium", "large"],
+      },
+      reasoning: {
+        type: "string",
+      },
+    },
+    required: ["score", "tier", "reasoning"],
+  },
+} as const;
 
 // The model returns a raw 1-10 score, but the pipeline branches on these three tiers.
 function scoreToTier(score: number): PluginComplexityTier {
@@ -30,8 +60,8 @@ export async function router(
   const assistantInput = buildPluginAssistantInput(request);
 
   log.response("OPENAI INPUT (pluginRouter)", {
-    system: pluginPrompts.sharedSystem,
-    developer: pluginPrompts.complexityRouter.developer,
+    system: systemPrompt,
+    developer: pluginPrompts.complexityRouter,
     user: userInput,
     assistant: assistantInput,
   });
@@ -39,13 +69,13 @@ export async function router(
   const response = await client.responses.create({
     model: models.general.high.slow,
     input: [
-      { role: "system", content: pluginPrompts.sharedSystem },
-      { role: "developer", content: pluginPrompts.complexityRouter.developer },
+      { role: "system", content: systemPrompt },
+      { role: "developer", content: pluginPrompts.complexityRouter },
       { role: "user", content: userInput },
       { role: "assistant", content: assistantInput },
     ],
     text: {
-      format: pluginSchemas.complexityRouter,
+      format: complexityRouterSchema,
     },
   });
 
