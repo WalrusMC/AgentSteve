@@ -12,6 +12,10 @@ import { pterodactylWS } from "./tools/server/websocket.js";
 import type { AgentInfo, ResponderResponse, ToolResult } from "./types.js";
 import type { ReadDocFail, ReadDocSuccess } from "./tools/google.js";
 
+// TEMP TESTING sorry if I forget to remove this in commit #REMOVE
+import { architect } from "./agents/plugins/architect.js";
+import { arch } from "os";
+
 // Logger scoped to the Discord bot entrypoint
 const log = createLogger("index");
 const getErrorMessage = (err: unknown) => (err instanceof Error ? err.message : String(err));
@@ -100,13 +104,14 @@ client.on("messageCreate", async (message) => {
   if (!message.member?.permissions?.has(PermissionsBitField.Flags.Administrator)) return await message.reply(":warning: You don't have permission to talk to me right now. Only server administrators can talk to me.");
   if (currentlyRunning[`${message.guildId}`]) return await message.reply("Slow down there! I can only answer one question at a time.");
 
+  
   const servers = await prisma.server.findMany({
     where: {
       guildId: message.guildId
     }
   });
 
-  pterodactylWS.connect(servers.map(obj => obj.id));
+  if (servers.length) pterodactylWS.connect(servers.map(obj => obj.id));
 
   const info: AgentInfo = {
     guildId: message.guildId,
@@ -183,6 +188,9 @@ client.on("messageCreate", async (message) => {
       log.error("Attachment handling failed:", getErrorMessage(err));
     }
 
+
+    
+    
     // Documents
     const readDocResult: ToolResult<ReadDocSuccess, ReadDocFail> = message.content.includes("https://docs.google.com/document/d/") ? await gdoc.read(message.guildId, message.content, message) : { name: "readDoc", success: false, error: { reason: "NO_DOCS", code: 204 } };
     if (!readDocResult.success) {
@@ -204,7 +212,7 @@ client.on("messageCreate", async (message) => {
     if (!readDocResult.success && readDocResult?.error?.code !== 204 && readDocResult?.error?.code !== 404) toolHistory.push({ ...readDocResult, name: "readDoc" });
     if (readDocResult.success) toolHistory.push({ ...readDocResult, name: "readDoc" });
 
-    // Memory - TO DO: Create memory summaries and just memory
+    // Memory - TO DO: Create memory summaries and just memory lol
 
     // Forward to router, or skip the router if the last message was a clarification message.
     let responderResponse: ResponderResponse;
@@ -247,4 +255,6 @@ client.on("messageCreate", async (message) => {
     if (typingInterval) clearInterval(typingInterval);
     currentlyRunning[`${message.guildId}`] = false;
   }
+
+  
 });
