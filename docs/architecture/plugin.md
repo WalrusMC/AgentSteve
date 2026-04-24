@@ -1,55 +1,36 @@
-# Plugin Subsystem Architecture
+# Plugin Creation System
 
-The plugin subsystem is the most developed multi-agent workflow in `AgentSteve`. Its job is to turn a Discord request for a Paper 1.20.1 plugin into:
+## What This System Does
 
-- a built `.jar` in the guild downloads folder
-- a `Plugin` database record
-- a private GitHub source repository
-- a short summary returned to the user
+The plugin system turns a Discord request for a new Paper 1.20.1 plugin into:
 
-## Component map
+- A compiled `.jar` in `src/tools/downloads/<guildId>/`.
+- A `Download` database row for that JAR.
+- A `Plugin` database row with version, file, and summary metadata.
+- A private GitHub source repository named `<guildId>-<pluginName>`.
+- A final user-facing response from `moderate()`.
 
-```mermaid
-flowchart TD
-    A[moderate tool call: createNewPlugin] --> B[src/pipelines/plugin.ts]
-    B --> C[plugin complexity router]
-    C --> D{simple / medium / large}
-    D -->|simple| E[coder.createNew]
-    D -->|medium| F[architect]
-    F --> G[coder.createNew first task]
-    G --> H[coder.editExisting for later tasks]
-    D -->|large| I[unsupported]
+The public entrypoint is the `createNewPlugin` tool exposed by `src/agents/moderate.ts`. The actual workflow lives in `src/pipelines/plugin.ts`.
 
-    E --> J[project manifest]
-    H --> J
-    J --> K[plugin.buildNew]
-    K --> L{build ok?}
-    L -->|no| M[coder.fixBuildError]
-    M --> K
-    L -->|yes| N[reviewer]
-    N --> O[save Plugin record]
-    K --> P[write jar to downloads]
-    K --> Q[persist source to GitHub]
-```
+## How It Works
 
-## Core request and state shapes
+`moderate()` first asks the model to call `createNewPlugin` with a structured `PluginCreationRequest`. That request includes a Java-class-safe plugin name, a short intent, a behavior summary, and concrete requirements.
 
-The plugin pipeline is intentionally type-heavy. The important shapes are in `src/agents/plugins/types.ts`.
+`createNewPlugin()` then runs these stages:
 
-### `PluginCreationRequest`
+1. Reject duplicates by checking Prisma `Plugin` rows and GitHub repos through `plugin.exists()`.
+2. Ask the plugin complexity router for a 1-10 score and map it to `simple`, `medium`, or `large`.
+3. Generate a project manifest:
+   - `simple`: call `coder.createNew()` once.
+   - `medium`: call `architect()`, create an initial project from the first task, then apply edit plans for remaining tasks.
+   - `large`: stop with `LARGE_UNSUPPORTED`.
+4. Build the manifest into a JAR with `plugin.buildNew()`.
+5. If Maven fails, call `coder.fixBuildError()` and retry up to two times.
+6. Review the successful project with `reviewer()`.
+7. Save or update the `Plugin` row.
+8. Return the success payload to `moderate()`, which calls itself again with tool history and sends the final answer.
 
-This is the user-facing request passed into the pipeline:
-
-- `pluginName`
-- `assistantMessage.intent`
-- `assistantMessage.summary`
-- `assistantMessage.requirements[]`
-
-`moderate()` builds this object before calling `createNewPlugin`.
-
-### `PluginProjectManifest`
-
-This is the in-memory representation of a complete plugin project:
+The central data shape is `PluginProjectManifest` from `src/agents/plugins/types.ts`. It contains the complete in-memory project:
 
 - `description`
 - `javaFiles[]`
@@ -57,150 +38,117 @@ This is the in-memory representation of a complete plugin project:
 - `dependencies[]`
 - `repositories[]`
 
-This object is what the build tool consumes.
+For medium plugins, later tasks return `PluginEditPlan` instead of a full project. The pipeline applies those changes deterministically with local TypeScript code.
 
-### `PluginEditPlan`
+## System Map
 
-Medium-complexity follow-up tasks do not rewrite the whole project. They return a declarative patch plan:
+```mermaid
+flowchart TD
+    User[Discord admin asks for new plugin] --> Moderate[src/agents/moderate.ts]
+    Moderate --> ToolCall[createNewPlugin tool call]
+    ToolCall --> Pipeline[src/pipelines/plugin.ts createNewPlugin]
 
-- `deletions[]`
-- `insertions[]`
-- `newJavaFiles[]`
-- `newResourceFiles[]`
-- full replacement `dependencies[]`
-- full replacement `repositories[]`
+    Pipeline --> Duplicate{plugin.exists?}
+    Duplicate -->|yes| AlreadyExists[ALREADY_EXISTS]
+    Duplicate -->|no| Complexity[src/agents/plugins/router.ts]
 
-`src/pipelines/plugin.ts` applies the patch plan back onto the current manifest.
+    Complexity --> Tier{tier}
+    Tier -->|large| LargeUnsupported[LARGE_UNSUPPORTED]
+    Tier -->|simple| CoderCreate[coder.createNew full manifest]
+    Tier -->|medium| Architect[src/agents/plugins/architect.ts]
 
-## Pipeline stages
+    Architect --> Tasks[ordered PluginTask list]
+    Tasks --> FirstTask[coder.createNew first task]
+    FirstTask --> Remaining{more tasks?}
+    Remaining -->|yes| EditCoder[coder.editExisting edit plan]
+    EditCoder --> ApplyPlan[applyEditPlan in pipeline]
+    ApplyPlan --> Remaining
+    Remaining -->|no| Manifest[PluginProjectManifest]
+    CoderCreate --> Manifest
 
-### 1. Duplicate check
+    Manifest --> BuildLoop[runJarBuilderWorkflow]
+    BuildLoop --> Build[src/tools/plugin.ts buildNew]
+    Build --> Validate[validate java files and plugin.yml]
+    Validate --> RenderPom[merge defaults and render pom.xml]
+    RenderPom --> TempProject[src/tools/pluginBuilder/guildId/builderId]
+    TempProject --> Maven[mvn -f pom.xml -B clean package]
+    Maven --> BuildResult{build ok?}
 
-`createNewPlugin()` first calls `plugin.exists(pluginName, guildId)`.
+    BuildResult -->|no, repair attempts left| FixCoder[coder.fixBuildError]
+    FixCoder --> BuildLoop
+    BuildResult -->|no, exhausted| BuildFailed[BUILD_FAILED]
+    BuildResult -->|yes| MoveJar[move JAR to downloads]
+    MoveJar --> DownloadRow[(Download row)]
+    MoveJar --> GitHub[create repo and write source files]
+    GitHub --> Artifact[BuiltPluginArtifact]
 
-That checks:
+    Artifact --> Reviewer[src/agents/plugins/reviewer.ts]
+    Reviewer --> Summary[review summary or fallback summary]
+    Summary --> PluginRow[(Plugin row)]
+    PluginRow --> Success[PluginPipelineSuccess]
+    Success --> ModerateAgain[moderate with toolHistory]
+    ModerateAgain --> Reply[Discord response with optional JAR attachment]
+```
 
-- Prisma `Plugin` rows
-- GitHub repos scoped to `agent-steve-official/<guildId>-<pluginName>`
+## Specialist Agents
 
-If either already exists, the pipeline stops immediately.
+`src/agents/plugins/router.ts`
 
-### 2. Complexity routing
+- Classifies plugin complexity from 1 to 10.
+- Recomputes the tier from the score instead of trusting the model's tier.
+- Uses `models.general.high.slow`.
 
-`src/agents/plugins/router.ts` scores the request from 1 to 10 and maps it to a tier:
+`src/agents/plugins/architect.ts`
 
-- `1-4` -> `simple`
-- `5-7` -> `medium`
-- `8-10` -> `large`
+- Runs only for medium plugins.
+- Produces ordered tasks with optional Maven dependencies and repositories.
+- Can mark a request impossible.
 
-The returned `tier` is recomputed from the score, even if the model supplied a mismatched tier.
+`src/agents/plugins/coder.ts`
 
-### 3. Project design
+- `createNew()` returns a complete `PluginProjectManifest`.
+- `editExisting()` returns a targeted `PluginEditPlan` against line-numbered files.
+- `fixBuildError()` returns a corrected full manifest after a build failure.
+- Uses coder models from `models.coder.high.slow`.
 
-#### Simple
+`src/agents/plugins/reviewer.ts`
 
-- Skip the architect entirely.
-- Call `coder.createNew()`.
-- Expect a full `PluginProjectManifest`.
+- Runs only after a successful build.
+- Summarizes user-facing behavior, commands, permissions, and notes.
+- Failure does not discard the built JAR. The pipeline falls back to the project description or original request summary.
 
-#### Medium
+## Build Tool Behavior
 
-- Call `architect()` to get sequential `PluginTask[]`.
-- Use the first task when calling `coder.createNew()`.
-- For each remaining task, call `coder.editExisting()` against the current manifest.
-- Apply each returned `PluginEditPlan` locally inside the pipeline.
+`src/tools/plugin.ts` owns compilation and artifact persistence.
 
-#### Large
+It validates:
 
-- Immediately fail with `LARGE_UNSUPPORTED`.
+- At least one Java file exists.
+- `plugin.yml` exists.
+- `plugin.yml` contains `main: com.walrusmc.<pluginNameLower>.<PluginName>`.
+- Project file paths are relative and cannot escape the build workspace.
+- Duplicate project file paths are rejected.
 
-### 4. Build and repair loop
+It then:
 
-`runJarBuilderWorkflow()` handles compilation and bounded repair:
+- Merges model dependencies and repositories with default Paper and Adventure dependencies.
+- Renders `pom.xml`.
+- Writes files into a temporary Maven workspace.
+- Runs `mvn -f pom.xml -B clean package`.
+- Moves the built JAR into the guild downloads folder.
+- Creates or updates the matching `Download` row.
+- Creates a private GitHub repo and writes all source files plus `pom.xml`.
+- Removes the temporary builder workspace in `finally`.
 
-- Attempt to build the current manifest once.
-- If the build fails with `BUILD_FAILED`, call `coder.fixBuildError()`.
-- Retry build.
-- Maximum repair attempts: `2`
+## Problems, Limitations, And Notes
 
-This means the workflow allows:
-
-- 1 initial build
-- up to 2 fix-and-rebuild cycles
-
-If any other build error happens, or retries are exhausted, the pipeline returns `BUILD_FAILED`.
-
-### 5. Review and persistence
-
-After a successful build:
-
-1. `reviewer()` summarizes the finished project and artifact.
-2. `savePluginRecord()` writes or updates the Prisma `Plugin` row.
-3. The user-facing success payload includes:
-   - `pluginName`
-   - `version`
-   - `file`
-   - `summary`
-   - `complexityScore`
-   - `complexityTier`
-
-If the reviewer fails, the pipeline still keeps the working build and falls back to:
-
-- `project.description`, if present
-- otherwise `request.assistantMessage.summary`
-
-## Build tool behavior
-
-`src/tools/plugin.ts` owns the build step.
-
-It:
-
-- validates that at least one Java file exists
-- requires `plugin.yml`
-- requires `plugin.yml` to contain `main: com.walrusmc.<pluginNameLower>.<PluginName>`
-- merges default and model-supplied repositories/dependencies
-- renders `pom.xml`
-- writes the project into a temporary builder directory
-- runs `mvn -f pom.xml -B clean package`
-- moves the built JAR into `src/tools/downloads/<guildId>/`
-- creates or updates the matching `Download` row
-- writes all source files plus `pom.xml` to GitHub
-
-## Why the patch application is local
-
-The edit coder does not directly emit whole-file rewrites for medium tasks. The pipeline applies its patch plan itself. That gives the pipeline control over:
-
-- duplicate file detection
-- path normalization
-- deterministic task ordering
-- error handling when an edit plan cannot be applied
-
-This is one of the cleaner design choices in the current codebase: the model proposes edits, and deterministic TypeScript code mutates the project state.
-
-## What each plugin specialist can see
-
-All plugin specialists share the same normalized `user` payload:
-
-- `pastChats`
-- `currentUserMessage`
-
-They also all receive an `assistant` payload that starts with:
-
-- `pluginRequest`
-
-Then each specialist gets its own extra context:
-
-- complexity router: just `pluginRequest`
-- architect: just `pluginRequest`
-- coder create: `pluginRequest` plus workflow task context
-- coder edit: `pluginRequest` plus workflow context plus line-numbered current project
-- coder fix: `pluginRequest` plus full current project plus build error text
-- reviewer: `pluginRequest` plus final project plus built artifact
-
-## Current limitations
-
-- The whole subsystem only supports creating new plugins from the user-facing `moderate()` agent.
-- Complexity tier `large` is deliberately blocked.
-- Build repair is limited to two fix attempts.
-- GitHub persistence failure causes the overall build result to fail even if the JAR was created successfully.
-- The pipeline assumes Maven is available locally and that GitHub credentials are configured.
+- Only new plugin creation is exposed to users. Editing an existing plugin is not exposed by `moderate()`.
+- `large` plugin requests are deliberately rejected.
+- Build repair is capped at two fix attempts after the initial build.
+- GitHub source persistence failure makes `plugin.buildNew()` fail even if Maven produced a valid JAR and the JAR was moved to downloads.
+- The pipeline assumes Maven is installed and available as `mvn`.
+- The generated plugin must target Paper 1.20.1 and Java 17.
+- The GitHub helper is hard-coded around the `agent-steve-official` account for repo file operations.
+- `plugin.exists()` falls back to DB-only duplicate checks if GitHub repo listing fails.
+- Medium task patching is deterministic, but line-based insertions and deletions still rely on the model choosing correct line numbers.
+- `todos.txt` notes desired future work for default plugins and cleaner generated plugin folder structures.

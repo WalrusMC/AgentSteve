@@ -1,162 +1,160 @@
 # AgentSteve Architecture Overview
 
-`AgentSteve` is a TypeScript Node.js application with two live entrypoints:
+## What This System Does
 
-- A Discord bot runtime in `src/index.ts`
-- An internal Express API in `src/api/server.ts`
+`AgentSteve` is a TypeScript Node.js service that runs a Discord bot and a small internal Express API in the same process. The bot helps Minecraft server owners through a routed agent stack. The API supports trusted callbacks and setup workflows for Google OAuth and Pterodactyl server access.
 
-`app.ts` starts both by importing them in the same process.
+The active production path today is:
 
-## System map
+1. Discord mention enters `src/index.ts`.
+2. `src/router.ts` classifies the request.
+3. The request goes to `nano`, `moderate`, or the placeholder `complex` path.
+4. `moderate` can read Google Docs, create new Paper plugins, or perform Pterodactyl power actions.
+5. Results are persisted through Prisma and sent back to Discord.
+
+## Documentation Map
+
+- [discord-runtime.md](discord-runtime.md) - Discord lifecycle, message gating, attachments, Google Doc pre-read, clarification state, and replies.
+- [agent-routing.md](agent-routing.md) - Classifier, router, nano responder, moderate responder, tool loop, and routing limitations.
+- [plugin.md](plugin.md) - New-plugin generation pipeline, specialist agents, Maven build loop, GitHub source persistence, and plugin records.
+- [google-docs.md](google-docs.md) - Google OAuth token storage and Google Docs reading.
+- [server-management.md](server-management.md) - Pterodactyl server access checks, power operations, file tools, and websocket console capture.
+- [internal-api.md](internal-api.md) - Internal Express API, auth middleware, and controllers.
+- [persistence-and-files.md](persistence-and-files.md) - Prisma models, local download/build/log folders, and local state.
+- [workflow-orchestrator.md](workflow-orchestrator.md) - In-progress workflow planner in `src/agents/workflow.ts`.
+
+## How It Works
+
+`app.ts` imports the Discord runtime and Express API server. Both modules run immediately on import.
+
+The Discord runtime owns the user-facing request lifecycle. It creates guild records on startup and guild join, accepts only administrator mentions, gathers recent chat context, stores attachments, pre-reads Google Docs when possible, opens websocket connections for known servers, and then calls the router.
+
+The router uses the classifier's JSON flags to pick a responder:
+
+- `nano` for plain-text answers that do not require tools.
+- `moderate` for tool-backed work and higher-capability reasoning.
+- `complex` for large or multi-step work, but this responder is currently only a placeholder.
+
+The moderate responder exposes a small tool set to the model:
+
+- `respond`
+- `createNewPlugin`
+- `clarify`
+- `readDoc`
+- `serverPower`
+- built-in `web_search`
+
+The plugin pipeline is the deepest workflow. It routes complexity, optionally designs tasks, generates or edits an in-memory project manifest, builds with Maven, attempts bounded build repair, stores the JAR in downloads, persists source to GitHub, reviews the project, and writes a `Plugin` row.
+
+The internal API is intended for trusted services only. Every route is guarded by `Authorization: Bearer <STEVE_INTERNAL_KEY>`.
+
+## System Map
 
 ```mermaid
 flowchart TD
-    A[app.ts] --> B[src/index.ts Discord bot]
-    A --> C[src/api/server.ts Express API]
+    App[app.ts] --> Discord[src/index.ts Discord runtime]
+    App --> Api[src/api/server.ts Internal Express API]
 
-    B --> D[Discord messageCreate handler]
-    D --> E[getPastChats]
-    D --> F[gdoc.read pre-read]
-    D --> G[router]
-    G --> H[classifier]
-    G --> I[nano]
-    G --> J[moderate]
-    G --> K[complex placeholder]
+    Discord --> Ready[clientReady and guildCreate setup]
+    Ready --> Guilds[(Prisma Guild rows)]
+    Ready --> DownloadsDir[src/tools/downloads/guildId]
 
-    J --> L[createNewPlugin pipeline]
-    J --> M[gdoc tool]
-    J --> N[server tool]
+    Discord --> Mention[messageCreate mention]
+    Mention --> Gate[bot/everyone/guild/admin/concurrency gates]
+    Gate --> Context[getPastChats]
+    Gate --> Attachments[download attachments]
+    Gate --> KnownServers[load guild servers]
+    KnownServers --> WS[pterodactylWS.connect]
+    Gate --> GDocPreRead[gdoc.read pre-read for doc links]
+    Gate --> ClarifyState{clarification active?}
 
-    L --> O[plugin complexity router]
-    L --> P[architect]
-    L --> Q[coder]
-    L --> R[reviewer]
-    L --> S[plugin build tool]
+    ClarifyState -->|moderate| Moderate[src/agents/moderate.ts]
+    ClarifyState -->|complex| ComplexPlaceholder[complex placeholder reply]
+    ClarifyState -->|none| MainRouter[src/router.ts]
 
-    S --> T[Maven temp workspace]
-    S --> U[GitHub source repo]
-    S --> V[guild downloads folder]
+    MainRouter --> Classifier[src/agents/classifier.ts]
+    Classifier --> RouteChoice{routing flags}
+    RouteChoice -->|no flags| Nano[src/agents/nano.ts]
+    RouteChoice -->|tool/planning flags| Moderate
+    RouteChoice -->|large/multi-server/debug flags| ComplexPlaceholder
 
-    B --> W[Prisma SQLite]
-    C --> W
-    N --> X[Pterodactyl HTTP API]
-    N --> Y[Pterodactyl websocket]
-    M --> Z[Google Docs API]
+    Nano -->|respond tool| DiscordReply[sendMsgDiscord]
+    Nano -->|moderate tool| Moderate
+
+    Moderate -->|respond| DiscordReply
+    Moderate -->|clarify| ClarificationReply[send clarification]
+    ClarificationReply --> Clarifications[(clarifications in memory)]
+    Moderate -->|createNewPlugin| PluginPipeline[src/pipelines/plugin.ts]
+    Moderate -->|readDoc| GDocs[src/tools/google.ts]
+    Moderate -->|serverPower| ServerPower[src/tools/server/server.ts]
+
+    PluginPipeline --> PluginAgents[src/agents/plugins/*]
+    PluginPipeline --> PluginBuild[src/tools/plugin.ts]
+    PluginBuild --> Maven[Maven build workspace]
+    PluginBuild --> GitHub[GitHub source repo]
+    PluginBuild --> Downloads[(Download row and JAR)]
+    PluginPipeline --> Plugins[(Plugin row)]
+
+    ServerPower --> PteroHTTP[Pterodactyl HTTP API]
+    WS --> ConsoleLines[(ConsoleLine rows)]
+    GDocs --> GoogleAPI[Google Docs API]
+
+    Api --> Auth[src/api/auth.ts]
+    Auth --> ApiRoutes[src/api/routes.ts]
+    ApiRoutes --> GuildCheck[guildChecker]
+    ApiRoutes --> OAuth[googleOAuth]
+    ApiRoutes --> ServerAccess[serverAccessChecker]
+    OAuth --> GuildUser[(GuildUser token)]
+    ServerAccess --> ServerAdd[server.addNew]
+    ServerAdd --> Servers[(Server rows)]
 ```
 
-## Main runtime layers
+## Major Runtime Layers
 
-### 1. Entry and orchestration
+### Entrypoints
 
-- `app.ts` loads the Discord bot and the internal API server.
-- `src/index.ts` owns Discord lifecycle, message gating, attachment ingestion, doc pre-reading, clarification state, and final reply handling.
-- `src/router.ts` decides whether to use `nano`, `moderate`, or the placeholder `complex` responder.
+- `app.ts` starts the bot and API by importing modules.
+- `src/index.ts` owns Discord runtime behavior.
+- `src/api/server.ts` owns the internal Express server.
 
-### 2. Agents
+### Agents
 
-- `src/agents/classifier.ts` sets routing flags for the current message.
-- `src/agents/nano.ts` is a lightweight responder that either answers directly or escalates to `moderate`.
-- `src/agents/moderate.ts` is the main tool-using responder.
-- `src/agents/plugins/*` contains the plugin-specific specialists:
-  - `router.ts` scores plugin complexity
-  - `architect.ts` breaks medium plugins into tasks
-  - `coder.ts` generates plugin manifests or edit plans
-  - `reviewer.ts` summarizes a finished plugin
+- `src/agents/classifier.ts` returns routing flags.
+- `src/agents/nano.ts` answers simple requests or escalates to `moderate`.
+- `src/agents/moderate.ts` orchestrates the currently exposed tools.
+- `src/agents/workflow.ts` contains an in-progress workflow planner that is not wired into the current router.
+- `src/agents/plugins/*` contains plugin-specialist agents for complexity, planning, coding, and review.
 
-### 3. Pipelines and tools
+### Tools and Pipelines
 
-- `src/pipelines/plugin.ts` is the most complete multi-step workflow in the repo.
-- `src/tools/google.ts` reads Google Docs after OAuth.
-- `src/tools/server/*` manages Pterodactyl server access, power state, files, and websockets.
-- `src/tools/plugin.ts` turns an in-memory plugin manifest into a built JAR, stores it in downloads, and mirrors the source to GitHub.
-- `src/tools/sendMsgDiscord.ts` splits long replies and attaches downloaded files.
+- `src/pipelines/plugin.ts` runs new-plugin creation end to end.
+- `src/tools/plugin.ts` builds plugin manifests into JARs and persists source to GitHub.
+- `src/tools/google.ts` reads Google Docs through stored OAuth tokens.
+- `src/tools/server/*` manages Pterodactyl access, power, files, and console websockets.
+- `src/tools/sendMsgDiscord.ts` sends split Discord replies and file attachments.
 
-### 4. Persistence and local state
+### Persistence and Local State
 
 - Prisma uses SQLite through `lib/prisma.ts`.
-- Permanent-ish state lives in Prisma models.
-- Per-process transient state lives in memory:
+- Durable domain state lives in `Guild`, `Download`, `Plugin`, `Server`, `ConsoleLine`, and `GuildUser`.
+- Transient state lives in process memory:
   - `clarifications[guildId]`
   - `currentlyRunning[guildId]`
   - `pterodactylWS.sockets`
   - `pterodactylWS.pendingCommands`
 - Local filesystem state lives under:
-  - `src/tools/downloads/<guildId>/` for user uploads, server downloads, and built plugin JARs
-  - `src/tools/pluginBuilder/<guildId>/<builderId>/` for temporary Maven builds
-  - `dev-logs/` for JSON log files
+  - `src/tools/downloads/<guildId>/`
+  - `src/tools/pluginBuilder/<guildId>/<builderId>/`
+  - `dev-logs/`
 
-## Discord request lifecycle
+## Problems, Limitations, And Notes
 
-When an admin mentions Steve in a guild:
-
-1. `src/index.ts` rejects bot messages, `@everyone`, DMs, non-admins, and concurrent guild requests.
-2. It loads guild servers from Prisma and opens websocket connections for them.
-3. It builds `AgentInfo` with:
-   - `guildId`
-   - the current Discord `message`
-   - `pastChats` from `getPastChats()`
-4. It downloads attached files into the guild downloads folder and records them in Prisma.
-5. If the message contains Google Doc URLs, it pre-runs `gdoc.read()`.
-6. It routes through:
-   - a clarification shortcut, if one is active for the guild
-   - otherwise `src/router.ts`
-7. It sends the resulting Discord message(s) and suppresses embeds when possible.
-
-## Internal API surface
-
-The Express server is small and intended for trusted internal callers.
-
-- `GET /internal/aiagents/steve/guilds/check`
-  - Returns whether a guild exists in the DB.
-- `POST /internal/aiagents/steve/oauth/google/callback`
-  - Stores Google OAuth tokens for a user/guild pair.
-- `POST /internal/aiagents/steve/serveraccess/check`
-  - Attempts to grant Steve access to a remote Pterodactyl server.
-
-All routes are guarded by `Authorization: Bearer <STEVE_INTERNAL_KEY>` through `src/api/auth.ts`.
-
-## Data model
-
-`prisma/schema.prisma` defines the persistent objects:
-
-- `Guild`: top-level ownership bucket.
-- `Download`: files Steve can later send back or upload elsewhere.
-- `Plugin`: metadata for generated plugins.
-- `Server`: remote server metadata plus cached `data` JSON and current `status`.
-- `ConsoleLine`: websocket-captured console history for a server.
-- `GuildUser`: per-user, per-guild OAuth token storage.
-
-## External dependencies
-
-- Discord: message ingress and response transport.
-- OpenAI Responses API: all agent reasoning.
-- Google Docs API: reading shared documents.
-- Pterodactyl client API and websocket: server control and console data.
-- GitHub REST API: private source repo storage for generated plugins.
-- Maven: local plugin compilation.
-- SQLite via Prisma: application state.
-
-## Important implementation realities
-
-These are visible in the current code.
-
-- The `complex` responder is referenced but not implemented. Both `src/index.ts` and `src/router.ts` return placeholder text for it.
-- `src/router.ts` checks `routingFlags.needs_code_execution_or_debugging_or_testing`, but the classifier returns `needs_iterative_code_execution_or_debugging`. One intended complex-routing flag is currently disconnected.
-- `clarifications[guildId]` is set when a responder asks a clarification question, but it is never cleared after a normal follow-up.
-- `moderate()` advertises the built-in `web_search` tool, but its code only handles `function_call` outputs.
-- Server file tools exist in code, but `moderate()` currently exposes only `serverPower` to the model.
-- Editing existing plugins is explicitly not implemented at the user-facing `moderate()` layer, even though the internal plugin pipeline already has an edit-plan mechanism for medium plugin creation.
-
-## Suggested reading order in code
-
-For new maintainers, the clearest path is:
-
-1. `app.ts`
-2. `src/index.ts`
-3. `src/router.ts`
-4. `src/agents/nano.ts`
-5. `src/agents/moderate.ts`
-6. `src/pipelines/plugin.ts`
-7. `src/tools/plugin.ts`
-8. `src/tools/server/*`
-9. `src/tools/google.ts`
+- The `complex` responder is referenced by `src/index.ts`, `src/router.ts`, and `src/types.ts`, but it currently returns placeholder text.
+- `src/router.ts` checks `routingFlags.needs_code_execution_or_debugging_or_testing`, while the classifier schema returns `needs_iterative_code_execution_or_debugging`. That intended complex-routing flag is disconnected.
+- `clarifications[guildId]` is set after a clarification, but it is not cleared after a normal follow-up.
+- `moderate()` advertises OpenAI `web_search`, but the code only handles function-call outputs. If the model returns a non-function web search result without a following function call, the responder falls into the "GPT did not call a tool" error path.
+- Server file tools exist in `src/tools/server/files.ts`, but `moderate()` currently exposes only `serverPower`.
+- User-facing existing-plugin editing is explicitly not implemented, even though the plugin pipeline has an internal edit-plan mechanism for medium new-plugin tasks.
+- Google Docs larger than about 20,000 serialized characters are rejected during pre-read; document summarization is marked TODO.
+- Memory summaries and Discord slash commands are marked TODO.
+- Pterodactyl websocket console command resolution depends on sentinel command output and recent console history, so it is sensitive to server output formatting and timing.
