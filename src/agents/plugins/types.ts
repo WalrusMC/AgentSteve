@@ -85,9 +85,7 @@ export type PluginCreationRequest = {
 };
 
 export type PluginComplexityDecision = {
-  score: number;
   tier: PluginComplexityTier;
-  reasoning: string;
 };
 
 export type PluginReview = {

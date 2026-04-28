@@ -16,31 +16,36 @@ const systemPrompt = `You are Steve, a multi-agent system built to assist Minecr
 You are specifically the plugin complexity routing specialist agent, part of Steve, a multi-agent system.
 You classify Paper 1.20.1 plugin requests by implementation complexity.
 Return only valid JSON that matches the provided schema.
-Do not use markdown fences.
-Do not explain your reasoning outside the JSON response.`;
+Do not use markdown fences.`;
 const complexityRouterSchema = {
   type: "json_schema",
   name: "plugin_complexity_router",
   strict: true,
-  schema: {
-    type: "object",
-    additionalProperties: false,
-    properties: {
-      score: {
-        type: "integer",
-        minimum: 1,
-        maximum: 10,
-      },
-      tier: {
-        type: "string",
-        enum: ["simple", "medium", "large"],
-      },
-      reasoning: {
-        type: "string",
-      },
+  "schema": {
+    "type": "object",
+    "properties": {
+      "complexity": {
+        "type": "number",
+        "enum": [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7,
+          8,
+          9,
+          10
+        ]
+      }
     },
-    required: ["score", "tier", "reasoning"],
-  },
+    "additionalProperties": false,
+    "required": [
+      "complexity"
+    ]
+  }
 } as const;
 
 // The model returns a raw 1-10 score, but the pipeline branches on these three tiers.
@@ -80,16 +85,12 @@ export async function router(
   });
 
   const parsed = JSON.parse(response.output_text) as {
-    score: number;
-    tier: PluginComplexityTier;
-    reasoning: string;
+    complexity: number;
   };
-  // Clamp the score so a bad model response cannot push the pipeline outside the expected range.
-  const score = Math.max(1, Math.min(10, parsed.score));
+  // Clamp the complexity score so a bad model response cannot push the pipeline outside the expected range.
+  const complexity = Math.max(1, Math.min(10, parsed.complexity));
 
   return {
-    score,
-    tier: scoreToTier(score),
-    reasoning: parsed.reasoning,
+    tier: scoreToTier(complexity)
   };
 }
