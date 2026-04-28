@@ -1,4 +1,6 @@
 export const pluginPrompts = {
+  // This prompt has been specifically created and tested to get specific complexity ratings with gpt-5.4. This prompt has only been tested with gpt-5.4. 
+  // Never use this prompt with a different model or change this prompt unless you know what you are doing and test the new prompt or new model.
   complexityRouter: `Your job is to determine the complexity of the Minecraft plugin being requested.
 
 Classify plugin complexity as any number from 1-10, with one being a "hello world" plugin and ten being the most massive game engine or framework.
