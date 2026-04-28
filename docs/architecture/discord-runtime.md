@@ -80,6 +80,12 @@ flowchart TD
     SuppressEmbeds --> Finally
 ```
 
+## Dependencies
+
+- **Why this shape:** The runtime centralizes Discord gating, context collection, attachment handling, Google Doc pre-read, server websocket preparation, and final replies so each responder receives a consistent `AgentInfo` object. Per-guild in-memory state keeps single-process request handling simple.
+- **Depends on:** Discord.js, `DISCORD_TOKEN`, Prisma guild/download/server rows, local download storage, Google Docs tooling, Pterodactyl websocket tooling, the router, `moderate()`, and `sendMsgDiscord`.
+- **Depended on by:** All user-facing Discord behavior, agent routing, clarification follow-ups, attachment-backed file workflows, generated plugin delivery, and server console connection setup.
+
 ## Problems, Limitations, And Notes
 
 - `currentlyRunning` is process-local. It does not coordinate across multiple Node processes.

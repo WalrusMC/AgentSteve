@@ -66,6 +66,12 @@ flowchart TD
     AddNew --> ServerResponse[result code]
 ```
 
+## Dependencies
+
+- **Why this shape:** The API is intentionally small and bearer-token protected because it exists for trusted setup callbacks rather than public user traffic. It delegates domain work to controllers and tools so Discord-facing code and external setup flows share the same Prisma records.
+- **Depends on:** Express, `STEVE_INTERNAL_KEY`, `PORT` and `HOSTNAME`, Prisma guild and user/server models, the Google OAuth controller, and `server.addNew()`.
+- **Depended on by:** External Google OAuth callback infrastructure, external server-access setup flows, guild existence checks, `gdoc.read()` token lookup, and the server management onboarding path.
+
 ## Problems, Limitations, And Notes
 
 - The API is intended for internal callers only. There is no user-session auth, only a shared bearer key.

@@ -90,6 +90,12 @@ flowchart TD
     ToolHistory --> Moderate
 ```
 
+## Dependencies
+
+- **Why this shape:** Routing keeps cheap plain-text answers on `nano`, sends tool-backed work to `moderate`, and reserves large multi-step work for a future complex responder. This keeps expensive tool context and recursive tool loops out of requests that do not need them.
+- **Depends on:** `AgentInfo`, classifier JSON flags, OpenAI tool calling, Prisma downloads/plugins, `server.readAndUpdate()`, Google Docs tooling, plugin creation, server power operations, and Discord response helpers.
+- **Depended on by:** The Discord runtime for every non-clarification request, `nano` escalation into `moderate`, tool-history driven follow-up turns, plugin creation, document reads, and server power requests.
+
 ## Problems, Limitations, And Notes
 
 - The complex responder does not exist yet. The route returns placeholder text.

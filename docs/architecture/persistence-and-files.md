@@ -83,6 +83,12 @@ flowchart TD
     Console[wrapped console methods] --> DevLogs
 ```
 
+## Dependencies
+
+- **Why this shape:** SQLite and local folders keep the bot deployable as a single Node process while still preserving guild resources across requests. External durable state is used only where the workflow naturally requires it, such as GitHub source repositories for generated plugins.
+- **Depends on:** Prisma, `@prisma/adapter-better-sqlite3`, `PRISMA_DATABASE_URL`, the local filesystem, guild ids from Discord, and GitHub for generated plugin source persistence.
+- **Depended on by:** Discord runtime setup, agent resource summaries, Google OAuth reads, plugin generation and build artifacts, Pterodactyl server management, file attachments, and dev logging.
+
 ## Problems, Limitations, And Notes
 
 - The SQLite database file in this workspace is `dev.db`, while the runtime uses `PRISMA_DATABASE_URL` from the environment.

@@ -147,6 +147,12 @@ flowchart TD
   - `src/tools/pluginBuilder/<guildId>/<builderId>/`
   - `dev-logs/`
 
+## Dependencies
+
+- **Why this shape:** The service is built as one Node process so the Discord bot, internal setup API, in-memory clarification/concurrency state, and shared Prisma client can coordinate without a separate job system. Tool-heavy work is isolated into agents, tools, and pipelines so the router can keep the user-facing request path narrow.
+- **Depends on:** Discord, OpenAI models and tool calling, Express, Prisma/SQLite, local filesystem storage, Google Docs/OAuth, Pterodactyl, GitHub, Maven, Java 17, and environment secrets.
+- **Depended on by:** Discord users, trusted internal setup callers, every subsystem documented here, and operational workflows that rely on shared guild, download, plugin, server, OAuth, and console state.
+
 ## Problems, Limitations, And Notes
 
 - The `complex` responder is referenced by `src/index.ts`, `src/router.ts`, and `src/types.ts`, but it currently returns placeholder text.

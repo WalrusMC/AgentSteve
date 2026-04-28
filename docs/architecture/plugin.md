@@ -140,6 +140,12 @@ It then:
 - Creates a private GitHub repo and writes all source files plus `pom.xml`.
 - Removes the temporary builder workspace in `finally`.
 
+## Dependencies
+
+- **Why this shape:** Plugin generation is split into routing, design, coding, build, repair, review, and persistence because generated Java must compile before it is useful to a Discord user. Keeping the project as a structured manifest lets the pipeline validate and patch files deterministically before Maven writes a real workspace.
+- **Depends on:** `moderate()` tool calls, plugin-specialist OpenAI agents, Prisma `Plugin` and `Download` rows, guild download and temporary builder folders, Maven, Java 17, Paper 1.20.1 dependencies, and GitHub repository helpers.
+- **Depended on by:** The `createNewPlugin` tool exposed by `moderate()`, Discord replies that attach built JARs, future plugin editing workflows, persistence/resource summaries, and any server-upload flow that later consumes generated JAR downloads.
+
 ## Problems, Limitations, And Notes
 
 - Only new plugin creation is exposed to users. Editing an existing plugin is not exposed by `moderate()`.

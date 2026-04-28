@@ -78,6 +78,12 @@ flowchart TD
     Downloads --> DownloadRows[(Download rows)]
 ```
 
+## Dependencies
+
+- **Why this shape:** Pterodactyl remains the source of truth for server state while Prisma keeps enough cached metadata for routing, resource summaries, and status updates. Server ownership is proven with a temporary file on the remote server because the bot only knows a Discord guild id during setup.
+- **Depends on:** The Pterodactyl HTTP and websocket APIs, a valid Pterodactyl client key, Prisma `Server` and `ConsoleLine` models, guild-scoped download storage, and the shared Discord guild id.
+- **Depended on by:** The internal server-access API, Discord startup/request preparation, `moderate()` server power tooling, the in-progress workflow planner, and server file transfer paths that create or consume `Download` rows.
+
 ## Problems, Limitations, And Notes
 
 - `moderate()` currently exposes only `serverPower`; file operations and console commands are implemented but not exposed as model tools.

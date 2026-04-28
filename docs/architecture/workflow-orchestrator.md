@@ -63,6 +63,12 @@ flowchart TD
     SubWorkflow --> ExecutorMissing
 ```
 
+## Dependencies
+
+- **Why this shape:** The workflow orchestrator is planner-only so larger requests can be decomposed without committing to an executor contract that does not exist yet. It mirrors `moderate()` context building so future complex workflows can plan against the same downloads, plugins, servers, and tool history exposed to the active responder.
+- **Depends on:** `AgentInfo`, `ToolResult` history, Prisma `Download` and `Plugin` rows, `server.readAndUpdate(guildId)`, shared plugin task schemas, and OpenAI structured-output models.
+- **Depended on by:** No production route depends on it today. A future complex responder and workflow executor would depend on `initWorkflow()` for top-level task plans and `subWorkflow()` for nested goals.
+
 ## Problems, Limitations, And Notes
 
 - This system is not connected to the active router. Requests that should go complex receive placeholder text today.

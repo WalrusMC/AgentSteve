@@ -61,6 +61,12 @@ flowchart TD
     Controller --> Upsert[(upsert GuildUser token)]
 ```
 
+## Dependencies
+
+- **Why this shape:** Google Docs access is user-scoped because document permissions belong to the Discord user, not the guild as a whole. The runtime pre-reads linked docs when possible, while `moderate()` keeps an explicit `readDoc` tool for follow-up requests and model-directed reads.
+- **Depends on:** Google OAuth credentials, Google Docs API access, Prisma `GuildUser.token`, Discord message/user identity, the internal OAuth callback route, and `sendMsgDiscord` for authorization prompts.
+- **Depended on by:** Discord pre-read handling, the `readDoc` tool in `moderate()`, routing decisions that need document context, and any workflow planner or responder that needs linked document content.
+
 ## Problems, Limitations, And Notes
 
 - The internal API route is `/internal/aiagents/steve/oauth/google/callback`, while OAuth clients use `http://localhost:3000/aiagents/steve/oauth/google/callback`. The code comments imply an external web server proxies the public callback.
