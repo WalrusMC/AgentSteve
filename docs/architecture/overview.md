@@ -1,15 +1,33 @@
 # AgentSteve Architecture Overview
 
-## What This System Does
+## Goal
+The goal of `AgentSteve` is to create an AI assistant for Minecraft server owners that can:
+- Interact with remote Minecraft servers (files, console commands, power actions, etc)
+- Create and edit large-scale Minecraft plugins
+- Read documents, edit documents, browse the web, read certain file contents
 
-`AgentSteve` is a TypeScript Node.js service that runs a Discord bot and a small internal Express API in the same process. The bot helps Minecraft server owners through a routed agent stack. The API supports trusted callbacks and setup workflows for Google OAuth and Pterodactyl server access.
+Users should be able to:
+- Interact with `AgentSteve` through Discord (though we may also implement a UI on a website).
+- Revert changes `AgentSteve` makes to their Minecraft server through a simple UI.
+
+## About
+User-facing:
+On the surface `AgentSteve` is:
+- An AI assitant built to help Minecraft server owners.
+- One agent that the user talks to.
+
+Technical:
+On the technical side `AgentSteve` is:
+- A TypeScript Node.js service that runs a Discord bot and a small internal Express API in the same process. 
+- A complex AI system comprised of many interacting sub-agents.
+`AgentSteve` can better be understood as a full-scale app that uses LLMs where reasoning or text generation is needed rather than a simple chat bot.
 
 The active production path today is:
 
-1. Discord mention enters `src/index.ts`.
-2. `src/router.ts` classifies the request.
-3. The request goes to `nano`, `moderate`, or the placeholder `complex` path.
-4. `moderate` can read Google Docs, create new Paper plugins, or perform Pterodactyl power actions.
+1. A Discord mention enters `src/index.ts`.
+2. `src/agents/classifier.ts` evaluates different flags about the request and `src/router.ts` routes the request accordingly.
+3. The request is either forwarded to `nano`, `moderate`, or the unimplemented `complex` path.
+4. `nano` can only respond, `moderate` can iteratively call tools and then respond, and `complex` is unimplemented.
 5. Results are persisted through Prisma and sent back to Discord.
 
 ## Documentation Map
@@ -25,7 +43,7 @@ The active production path today is:
 
 ## How It Works
 
-`app.ts` imports the Discord runtime and Express API server. Both modules run immediately on import.
+`app.ts` is outdated. `npm run start` is now used to simultaneously start the bot and the API server.
 
 The Discord runtime owns the user-facing request lifecycle. It creates guild records on startup and guild join, accepts only administrator mentions, gathers recent chat context, stores attachments, pre-reads Google Docs when possible, opens websocket connections for known servers, and then calls the router.
 
@@ -52,24 +70,24 @@ The internal API is intended for trusted services only. Every route is guarded b
 
 ```mermaid
 flowchart TD
-    App[app.ts] --> Discord[src/index.ts Discord runtime]
+    App[npm run start] --> Discord[src/index.ts Discord runtime]
     App --> Api[src/api/server.ts Internal Express API]
 
-    Discord --> Ready[clientReady and guildCreate setup]
-    Ready --> Guilds[(Prisma Guild rows)]
-    Ready --> DownloadsDir[src/tools/downloads/guildId]
+    Discord --> Ready[When Steve starts or joins guild]
+    Ready --> Guilds[(Ensure databases for each guild)]
+    Ready --> DownloadsDir[Ensure downloads folder for each guild]
 
-    Discord --> Mention[messageCreate mention]
+    Discord --> Mention[When message mentions Steve]
     Mention --> Gate[bot/everyone/guild/admin/concurrency gates]
     Gate --> Context[getPastChats]
     Gate --> Attachments[download attachments]
-    Gate --> KnownServers[load guild servers]
+    Gate --> KnownServers[load connected Minecraft servers]
     KnownServers --> WS[pterodactylWS.connect]
-    Gate --> GDocPreRead[gdoc.read pre-read for doc links]
+    Gate --> GDocPreRead[gdoc.read pre-read any existing Google Docs]
     Gate --> ClarifyState{clarification active?}
 
     ClarifyState -->|moderate| Moderate[src/agents/moderate.ts]
-    ClarifyState -->|complex| ComplexPlaceholder[complex placeholder reply]
+    ClarifyState -->|complex| ComplexPlaceholder[Unimplemented. Placeholder reply]
     ClarifyState -->|none| MainRouter[src/router.ts]
 
     MainRouter --> Classifier[src/agents/classifier.ts]
@@ -113,7 +131,7 @@ flowchart TD
 
 ### Entrypoints
 
-- `app.ts` starts the bot and API by importing modules.
+- `npm run start` starts the bot and API by importing modules.
 - `src/index.ts` owns Discord runtime behavior.
 - `src/api/server.ts` owns the internal Express server.
 
@@ -155,6 +173,7 @@ flowchart TD
 
 ## Problems, Limitations, And Notes
 
+- The `clarify` system where the `src/agents/moderate.ts` agent can choose to use the clarify tool to clarify something rather than directly respond feels messy, inefficient, and unhelpful. Could there be a better way to do this?
 - The `complex` responder is referenced by `src/index.ts`, `src/router.ts`, and `src/types.ts`, but it currently returns placeholder text.
 - `src/router.ts` checks `routingFlags.needs_code_execution_or_debugging_or_testing`, while the classifier schema returns `needs_iterative_code_execution_or_debugging`. That intended complex-routing flag is disconnected.
 - `clarifications[guildId]` is set after a clarification, but it is not cleared after a normal follow-up.
